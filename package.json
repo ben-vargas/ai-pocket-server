@@ -18,12 +18,14 @@
     "fuzzysort": "^3.1.0",
     "hono": "^4.9.0",
     "ignore": "^7.0.5",
-    "node-pty": "^1.0.0",
     "vscode-jsonrpc": "^8.2.1",
     "vscode-languageserver-protocol": "^3.17.5",
     "vscode-uri": "^3.1.0",
     "ws": "^8.18.0",
     "zod": "^3.23.8"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.0.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
