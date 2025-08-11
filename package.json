@@ -1,0 +1,35 @@
+{
+  "name": "pocket-server-nodejs",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.59.0",
+    "@hono/node-server": "^1.18.1",
+    "@hono/node-ws": "^1.0.4",
+    "@xterm/headless": "^5.5.0",
+    "chokidar": "^3.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "fuzzysort": "^3.1.0",
+    "hono": "^4.9.0",
+    "ignore": "^7.0.5",
+    "node-pty": "^1.0.0",
+    "vscode-jsonrpc": "^8.2.1",
+    "vscode-languageserver-protocol": "^3.17.5",
+    "vscode-uri": "^3.1.0",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/node": "^20.11.17",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.7.1",
+    "typescript": "^5.8.3"
+  }
+}
