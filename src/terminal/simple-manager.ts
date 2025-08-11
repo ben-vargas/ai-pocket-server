@@ -3,23 +3,9 @@
  * Just handles PTY operations without any parsing
  */
 
+import * as pty from 'node-pty';
 import { EventEmitter } from 'events';
 import { logger } from '../shared/logger.js';
-
-let pty: any = null;
-try {
-  // Try to import node-pty if available
-  pty = await import('node-pty').catch(() => null);
-} catch (error) {
-  // node-pty not available, terminal features will be disabled
-}
-
-if (!pty) {
-  logger.terminal('node-pty not available', 'system', { 
-    message: 'Terminal features disabled - node-pty not installed',
-    isDeployment: process.env.NODE_ENV === 'production'
-  });
-}
 
 export interface TerminalSession {
   id: string;
@@ -30,7 +16,7 @@ export interface TerminalSession {
 }
 
 interface PTYSession extends TerminalSession {
-  pty: any; // Using any since pty might not be available
+  pty: pty.IPty;
 }
 
 export class SimpleTerminalManager extends EventEmitter {
@@ -39,13 +25,7 @@ export class SimpleTerminalManager extends EventEmitter {
   /**
    * Open a new terminal session
    */
-  open(id: string, cwd: string, rows: number = 24, cols: number = 80): TerminalSession | null {
-    // Check if pty is available
-    if (!pty) {
-      logger.terminal('open_failed', id, { error: 'Terminal features not available' });
-      return null;
-    }
-    
+  open(id: string, cwd: string, rows: number = 24, cols: number = 80): TerminalSession {
     // Close existing session if any
     if (this.sessions.has(id)) {
       this.close(id);
@@ -73,7 +53,7 @@ export class SimpleTerminalManager extends EventEmitter {
     });
     
     // Handle PTY exit
-    ptyProcess.onExit(({ exitCode, signal }: { exitCode: number | null; signal?: number }) => {
+    ptyProcess.onExit(({ exitCode, signal }) => {
       const code = exitCode || (signal ? 128 : 0);
       this.emit('exit', { id, code });
       

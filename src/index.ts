@@ -236,25 +236,6 @@ function handleTerminalMessage(ws: WSWebSocket, clientId: string, message: any) 
       
       // Open terminal session
       const session = terminalManager.open(id, resolved, rows, cols);
-      
-      // Check if terminal is available
-      if (!session) {
-        const error: WebSocketMessage = {
-          v: 1,
-          id: crypto.randomUUID(),
-          sessionId: clientId,
-          ts: new Date().toISOString(),
-          type: 'term:error',
-          payload: { 
-            id, 
-            error: 'Terminal features not available in this deployment' 
-          },
-          timestamp: Date.now(),
-        };
-        ws.send(JSON.stringify(error));
-        return;
-      }
-      
       termClientMap.set(id, clientId);
       
       // Send opened confirmation
