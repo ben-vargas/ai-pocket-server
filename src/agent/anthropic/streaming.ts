@@ -4,17 +4,17 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
-import type { 
-  StreamingState, 
-  ContentBlock, 
-  ServerMessage, 
-  ToolRequest,
-  ToolOutput,
-  WebSearchResult 
-} from './types';
 import { executeBash, isBashCommandDangerous } from './tools/bash';
 import { executeEditor, isEditorCommandDangerous } from './tools/editor';
 import { executeWebSearch } from './tools/web-search';
+import type { 
+  ContentBlock, 
+  ServerMessage, 
+  StreamingState, 
+  ToolOutput,
+  ToolRequest,
+  WebSearchResult 
+} from './types';
 
 export interface StreamHandlerOptions {
   sessionId: string;
@@ -99,7 +99,7 @@ export async function processStream(
           });
           break;
           
-        case 'content_block_start':
+        case 'content_block_start': {
           currentBlockIndex = event.index;
           const block = event.content_block as ContentBlock; // Cast to our ContentBlock type
           state.contentBlocks.push(block);
@@ -115,6 +115,7 @@ export async function processStream(
           }
           onStateUpdated?.(state);
           break;
+        }
           
         case 'content_block_delta':
           if (event.index !== currentBlockIndex) {

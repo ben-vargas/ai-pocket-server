@@ -4,22 +4,22 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { generateSystemPrompt } from './prompt';
+import { processStream } from './streaming';
+import { generateTitle } from './title';
+import { bashToolDefinition, executeBash } from './tools/bash';
+import { editorToolDefinition, executeEditor } from './tools/editor';
+import { executeWebSearch, webSearchToolDefinition } from './tools/web-search';
 import type { 
   AgentSession, 
   ClientMessage, 
-  ServerMessage,
-  MessageParam,
   Conversation,
+  CreateMessageRequest, 
+  MessageParam,
+  ServerMessage,
   ToolRequest,
-  ToolResultBlock,
-  CreateMessageRequest
+  ToolResultBlock
 } from './types';
-import { generateSystemPrompt } from './prompt';
-import { generateTitle } from './title';
-import { processStream } from './streaming';
-import { bashToolDefinition, executeBash } from './tools/bash';
-import { editorToolDefinition, executeEditor } from './tools/editor';
-import { webSearchToolDefinition, executeWebSearch } from './tools/web-search';
 
 export class AnthropicService {
   private anthropic: Anthropic | null = null;
@@ -119,7 +119,7 @@ export class AnthropicService {
       const anthropic = this.initClient(apiKey);
       const title = await generateTitle(anthropic, content);
       session.conversation.title = title;
-      try { await (await import('../store/session-store-fs')).sessionStoreFs.updateTitle(sessionId, title); } catch {}
+      try { await (await import('../store/session-store-fs.js')).sessionStoreFs.updateTitle(sessionId, title); } catch {}
       onMessage({ type: 'agent:title', sessionId, title });
     }
 
@@ -129,7 +129,7 @@ export class AnthropicService {
       content
     });
     session.conversation.updatedAt = new Date();
-    try { await (await import('../store/session-store-fs')).sessionStoreFs.recordUserMessage(sessionId, content, { workingDir, maxMode }); } catch {}
+    try { await (await import('../store/session-store-fs.js')).sessionStoreFs.recordUserMessage(sessionId, content, { workingDir, maxMode }); } catch {}
     session.phase = 'ready';
     onMessage({ type: 'agent:status', sessionId, phase: 'ready' } as any);
 

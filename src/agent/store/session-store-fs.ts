@@ -14,6 +14,7 @@
 
 import { promises as fs } from 'fs';
 import { dirname, join, resolve } from 'path';
+import { resolveDataPath } from '../../shared/paths';
 
 type Json = Record<string, any>;
 
@@ -52,7 +53,7 @@ class SessionStoreFs {
   private lastSeq = new Map<string, number>();
 
   constructor(baseDir?: string) {
-    const root = baseDir || resolve(process.cwd(), 'data', 'sessions');
+    const root = baseDir || resolve(resolveDataPath('sessions'));
     this.baseDir = root;
     this.indexPath = join(root, 'index.json');
   }
@@ -157,7 +158,7 @@ class SessionStoreFs {
   async recordUserMessage(sessionId: string, content: string, opts: { workingDir: string; maxMode?: boolean; titleIfFirst?: string }): Promise<void> {
     if (!sessionId) throw new Error('recordUserMessage requires a valid sessionId');
     await this.enqueue(sessionId, async () => {
-      let snap = await this.readSnapshot(sessionId);
+      const snap = await this.readSnapshot(sessionId);
       if (!snap) return; // caller must create session first
       // Update maxMode and workingDir if provided (reflect latest request settings)
       if (typeof opts.maxMode === 'boolean') {

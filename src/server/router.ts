@@ -4,7 +4,7 @@
  */
 
 import { Hono } from 'hono';
-import { logger } from '../shared/logger.js';
+import { logger } from '../shared/logger';
 
 type RouteHandler = (req: Request) => Promise<Response> | Response;
 
@@ -17,6 +17,7 @@ interface Route {
 export class Router {
   private app: Hono;
   private prefix: string;
+  private preHandler: ((req: Request) => Promise<Response | null> | Response | null) | null = null;
   
   constructor(prefix: string = '') {
     this.app = new Hono();
@@ -33,6 +34,10 @@ export class Router {
       case 'GET':
         this.app.get(fullPath, async (c) => {
           try {
+            if (this.preHandler) {
+              const maybe = await this.preHandler(c.req.raw);
+              if (maybe) return maybe;
+            }
             const response = await handler(c.req.raw);
             return response;
           } catch (error) {
@@ -44,6 +49,10 @@ export class Router {
       case 'POST':
         this.app.post(fullPath, async (c) => {
           try {
+            if (this.preHandler) {
+              const maybe = await this.preHandler(c.req.raw);
+              if (maybe) return maybe;
+            }
             const response = await handler(c.req.raw);
             return response;
           } catch (error) {
@@ -55,6 +64,10 @@ export class Router {
       case 'PUT':
         this.app.put(fullPath, async (c) => {
           try {
+            if (this.preHandler) {
+              const maybe = await this.preHandler(c.req.raw);
+              if (maybe) return maybe;
+            }
             const response = await handler(c.req.raw);
             return response;
           } catch (error) {
@@ -66,6 +79,10 @@ export class Router {
       case 'DELETE':
         this.app.delete(fullPath, async (c) => {
           try {
+            if (this.preHandler) {
+              const maybe = await this.preHandler(c.req.raw);
+              if (maybe) return maybe;
+            }
             const response = await handler(c.req.raw);
             return response;
           } catch (error) {
@@ -90,6 +107,13 @@ export class Router {
    */
   getApp(): Hono {
     return this.app;
+  }
+
+  /**
+   * Set a pre-handler to run before each route handler; return a Response to short-circuit.
+   */
+  usePre(fn: (req: Request) => Promise<Response | null> | Response | null): void {
+    this.preHandler = fn;
   }
 }
 

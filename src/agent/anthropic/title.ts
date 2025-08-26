@@ -3,7 +3,7 @@
  * Generates concise, contextual titles from first user message
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 
 /**
  * Generate a title for a conversation based on the first message

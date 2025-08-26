@@ -3,14 +3,23 @@
  * Main entry point for all AI agent providers
  */
 
+import { verifyAuthFromRequest } from '../auth/middleware';
 import type { Router } from '../server/router';
-import { registerAgentRoutes, handleAgentWebSocket } from './anthropic';
+import { handleAgentWebSocket, registerAgentRoutes } from './anthropic/index';
 import { sessionStoreFs } from './store/session-store-fs';
 
 /**
  * Register all agent modules with the router
  */
 export function registerAgentModule(router: Router): void {
+  // Protect all agent routes
+  router.usePre(async (req) => {
+    const auth = await verifyAuthFromRequest(req);
+    if (!auth.ok) {
+      return new Response(JSON.stringify({ error: auth.reason }), { status: auth.status, headers: { 'Content-Type': 'application/json' } });
+    }
+    return null;
+  });
   // Register Anthropic routes
   registerAgentRoutes(router);
   // Initialize file-based session store
@@ -44,10 +53,10 @@ export async function handleAgentMessage(
 
 // Re-export types
 export type { 
-  ClientMessage,
-  ServerMessage,
   AgentSession,
+  ClientMessage,
   Conversation,
-  ToolRequest,
-  ToolOutput
+  ServerMessage,
+  ToolOutput, 
+  ToolRequest
 } from './anthropic/types';

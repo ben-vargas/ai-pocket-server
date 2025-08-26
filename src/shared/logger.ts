@@ -18,16 +18,11 @@ class Logger {
 
   private log(level: LogLevel, category: string, message: string, data?: any): void {
     if (level < this.level) return;
-
-    const timestamp = new Date().toISOString();
-    const levelStr = LogLevel[level];
-    const logMessage = `[${timestamp}] [${levelStr}] [${category}] ${message}`;
-
-    if (data) {
-      console.log(logMessage, data);
-    } else {
-      console.log(logMessage);
-    }
+    const ts = new Date().toISOString();
+    // Unified single-line format: ts | LEVEL | category | message | json
+    const head = `${ts} | ${LogLevel[level].padEnd(5)} | ${category.padEnd(12)} | ${message}`;
+    const tail = data ? ` ${JSON.stringify(data)}` : '';
+    console.log(head + tail);
   }
 
   debug(category: string, message: string, data?: any): void {

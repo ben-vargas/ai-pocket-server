@@ -4,8 +4,8 @@
  */
 
 import { terminalService } from '../../../file-system/terminal';
-import type { BashToolInput, BashTool } from '../types';
 import type { Result } from '../../../shared/types/api';
+import type { BashTool, BashToolInput } from '../types';
 
 /**
  * Bash tool definition for Anthropic API
@@ -100,7 +100,7 @@ export function isBashCommandDangerous(command: string): boolean {
     /\b(shutdown|reboot|halt)\b/, // system control
     /\bmkfs\b/,                  // filesystem formatting
     /\bdd\s+.*of=\/dev/,         // dd to devices
-    /\b:\(\)\s*\{.*:\|\:/,       // fork bomb
+    /\b:\(\)\s*\{.*:\|:/,       // fork bomb
     /\b(kill|pkill|killall)\s+-9/, // force kill
   ];
 

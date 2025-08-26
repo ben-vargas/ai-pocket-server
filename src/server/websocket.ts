@@ -3,9 +3,9 @@
  * Manages WebSocket lifecycle and message routing
  */
 
-import type { WebSocketClient, WebSocketMessage } from '../shared/types/api.js';
-import { logger } from '../shared/logger.js';
 import type { WebSocket as WSWebSocket } from 'ws';
+import { logger } from '../shared/logger';
+import type { WebSocketClient, WebSocketMessage } from '../shared/types/api';
 
 // Export type alias for compatibility
 export type ServerWebSocket = WSWebSocket;
@@ -40,6 +40,21 @@ class WebSocketManager {
     if (client?.socket.readyState === 1) { // WebSocket.OPEN
       client.socket.send(JSON.stringify(message));
       logger.websocket('message_sent', clientId, { type: message.type });
+    }
+  }
+
+  /**
+   * Send binary data to a specific client (e.g., terminal frames)
+   */
+  sendBinary(clientId: string, data: Buffer | Uint8Array): void {
+    const client = this.clients.get(clientId);
+    if (client?.socket.readyState === 1) { // WebSocket.OPEN
+      try {
+        (client.socket as any).send(data, { binary: true });
+        logger.websocket('binary_sent', clientId, { bytes: (data as any).byteLength ?? (data as any).length });
+      } catch (e) {
+        logger.websocket('binary_send_error', clientId, { error: (e as Error)?.message });
+      }
     }
   }
   

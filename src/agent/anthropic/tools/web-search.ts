@@ -4,7 +4,7 @@
  * This file provides the tool definition and helper functions
  */
 
-import type { WebSearchTool, WebSearchToolInput, WebSearchResult } from '../types';
+import type { WebSearchResult, WebSearchTool, WebSearchToolInput } from '../types';
 
 /**
  * Web search tool definition for Anthropic API

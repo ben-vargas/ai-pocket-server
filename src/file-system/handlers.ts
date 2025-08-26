@@ -3,11 +3,11 @@
  * HTTP endpoints for file and terminal operations
  */
 
-import { homedir } from 'node:os';
 import { readFile as fsReadFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join as pathJoin, resolve as pathResolve } from 'node:path';
 import { fileSystemService } from './service';
-import { telescopeSearch } from './telescope-search.js';
+import { telescopeSearch } from './telescope-search';
 import { terminalService } from './terminal';
 import type { SearchOptions, TerminalCommand } from './types';
 
@@ -87,14 +87,7 @@ export async function handleWrite(req: Request): Promise<Response> {
       });
     }
 
-    // Notify LSPs about save to trigger diagnostics
-    try {
-      const { lspManager } = await import('../ide/lsp-manager.js');
-      console.log('[FS] File saved, notifying LSP:', path);
-      lspManager.notifyDidSave(path);
-    } catch (e) {
-      console.error('[FS] LSP notifyDidSave failed:', e);
-    }
+    
     
     return new Response(JSON.stringify(result.value), {
       headers: { 'Content-Type': 'application/json' },
@@ -154,9 +147,9 @@ export async function handleSearch(req: Request): Promise<Response> {
   const options: SearchOptions = {
     query,
     path: url.searchParams.get('path') || undefined,
-    maxDepth: parseInt(url.searchParams.get('maxDepth') || '3'),
+    maxDepth: parseInt(url.searchParams.get('maxDepth') || '3', 10),
     includeHidden: url.searchParams.get('includeHidden') === 'true',
-    limit: parseInt(url.searchParams.get('limit') || '50'),
+    limit: parseInt(url.searchParams.get('limit') || '50', 10),
   };
   
   const result = await fileSystemService.search(options);
@@ -183,8 +176,8 @@ export async function handleTelescopeSearch(req: Request): Promise<Response> {
   const cwd = url.searchParams.get('cwd') || process.cwd();
   const mode = (url.searchParams.get('mode') || 'files') as any;
   const includeHidden = url.searchParams.get('includeHidden') === 'true';
-  const limit = parseInt(url.searchParams.get('limit') || '50');
-  const maxDepth = parseInt(url.searchParams.get('maxDepth') || '10');
+  const limit = parseInt(url.searchParams.get('limit') || '50', 10);
+  const maxDepth = parseInt(url.searchParams.get('maxDepth') || '10', 10);
   
   // Enforce HOME_DIR boundary
   const resolvedCwd = pathResolve(cwd);

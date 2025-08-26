@@ -4,7 +4,7 @@
  * These types are the single source of truth shared between server and mobile
  */
 
-import type { Result } from '../../shared/types/api';
+
 
 // ============================================
 // Core Message Types

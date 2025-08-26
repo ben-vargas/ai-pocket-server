@@ -3,11 +3,11 @@
  * Core file operations with security boundaries
  */
 
-import { stat, readdir, readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve, relative, extname, basename, dirname } from 'node:path';
+import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import type { Result } from '../shared/types/api';
-import type { FileNode, DirectoryListing, FileContent, SearchOptions, SearchResult, FileSystemService } from './types';
+import type { DirectoryListing, FileContent, FileNode, FileSystemService, SearchOptions, SearchResult } from './types';
 
 /**
  * Security boundary - restrict operations to home directory
@@ -82,7 +82,7 @@ async function createFileNode(path: string, name: string): Promise<FileNode> {
     modified: stats.mtime,
     isHidden: name.startsWith('.'),
     extension: stats.isFile() ? extname(name) : undefined,
-    permissions: (stats.mode & parseInt('777', 8)).toString(8),
+    permissions: (stats.mode & 0o777).toString(8),
     projectType: stats.isDirectory() ? await detectProjectType(path) : undefined,
   };
 }

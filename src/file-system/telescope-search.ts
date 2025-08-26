@@ -3,10 +3,10 @@
  * Provides fast, fuzzy search capabilities across files, content, and symbols
  */
 
-import { readdir, stat, readFile } from 'fs/promises';
-import { join, relative, extname, basename } from 'path';
+import { readdir, readFile, stat } from 'fs/promises';
 import fuzzysort from 'fuzzysort';
 import ignore from 'ignore';
+import { basename, extname, join, relative } from 'path';
 import type { Result } from '../shared/types/api';
 
 export interface SearchResult {

@@ -77,3 +77,46 @@ export interface ServerStats {
     perMinute: number;
   };
 }
+
+/**
+ * Terminal streaming payload (server → client)
+ * Aggregated frame carrying raw UTF-8 text for a PTY session
+ */
+export interface TerminalFramePayload {
+  id: string;
+  seq: number;
+  ts: number; // server-side timestamp (ms)
+  data: string;
+}
+
+// Terminal control payloads (client -> server)
+export interface TermOpenOrAttachPayload {
+  id: string;
+  cwd?: string;
+  rows?: number;
+  cols?: number;
+}
+
+export interface TermAttachPayload { id: string }
+
+// Notifications API types
+export interface PushDevice {
+  deviceId: string;
+  expoPushToken: string;
+  platform: 'ios' | 'android';
+  subscriptions?: string[];
+  lastSeen: string; // ISO string
+}
+
+export interface PushRegisterRequest {
+  deviceId: string;
+  expoPushToken: string;
+  platform: 'ios' | 'android';
+  subscriptions?: string[];
+}
+
+export interface PushRegisterResponse {
+  success: boolean;
+  data?: PushDevice;
+  error?: string;
+}

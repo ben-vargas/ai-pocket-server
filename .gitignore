@@ -36,8 +36,10 @@ Thumbs.db
 .yarn/
 !.yarn/releases
 
-# Data directory (session data)
+# Data directories
 data/
+data/cloud-agents/
+data/runtime/
 
 # Logs
 logs/
@@ -50,3 +52,12 @@ coverage/
 # Temporary files
 tmp/
 temp/
+
+# Keys and certificates
+*.pem
+*.key
+*.p12
+*.crt
+*.cer
+*.pfx
+*.der

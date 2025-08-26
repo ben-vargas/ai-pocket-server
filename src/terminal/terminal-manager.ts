@@ -1,11 +1,11 @@
 /**
- * Simple Terminal PTY Manager
- * Just handles PTY operations without any parsing
+ * Terminal PTY Manager
+ * Handles PTY operations without parsing
  */
 
-import * as pty from 'node-pty';
 import { EventEmitter } from 'events';
-import { logger } from '../shared/logger.js';
+import * as pty from 'node-pty';
+import { logger } from '../shared/logger';
 
 export interface TerminalSession {
   id: string;
@@ -19,19 +19,16 @@ interface PTYSession extends TerminalSession {
   pty: pty.IPty;
 }
 
-export class SimpleTerminalManager extends EventEmitter {
+export class TerminalManager extends EventEmitter {
   private sessions = new Map<string, PTYSession>();
   
   /**
    * Open a new terminal session
    */
   open(id: string, cwd: string, rows: number = 24, cols: number = 80): TerminalSession {
-    // Close existing session if any
     if (this.sessions.has(id)) {
       this.close(id);
     }
-    
-    // Spawn PTY
     const shell = process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/bash');
     const ptyProcess = pty.spawn(shell, [], {
       name: 'xterm-256color',
@@ -46,23 +43,15 @@ export class SimpleTerminalManager extends EventEmitter {
         LC_ALL: process.env.LC_ALL || 'en_US.UTF-8',
       } as any,
     });
-    
-    // Handle PTY output - just emit raw data
     ptyProcess.onData((data: string) => {
       this.emit('data', { id, data });
     });
-    
-    // Handle PTY exit
     ptyProcess.onExit(({ exitCode, signal }) => {
       const code = exitCode || (signal ? 128 : 0);
       this.emit('exit', { id, code });
-      
-      // Clean up session
       this.sessions.delete(id);
       logger.terminal('session_closed', id, { code });
     });
-    
-    // Create session
     const session: PTYSession = {
       id,
       cwd,
@@ -71,17 +60,9 @@ export class SimpleTerminalManager extends EventEmitter {
       createdAt: Date.now(),
       pty: ptyProcess,
     };
-    
     this.sessions.set(id, session);
     logger.terminal('session_opened', id, { cwd, cols, rows });
-    
-    return {
-      id,
-      cwd,
-      cols,
-      rows,
-      createdAt: session.createdAt,
-    };
+    return { id, cwd, cols, rows, createdAt: session.createdAt };
   }
   
   /**
@@ -93,7 +74,6 @@ export class SimpleTerminalManager extends EventEmitter {
       logger.terminal('write_failed', id, { error: 'Session not found' });
       return;
     }
-    
     session.pty.write(data);
     logger.terminal('write', id, { length: data.length });
   }
@@ -107,7 +87,6 @@ export class SimpleTerminalManager extends EventEmitter {
       logger.terminal('resize_failed', id, { error: 'Session not found' });
       return;
     }
-    
     session.pty.resize(cols, rows);
     session.cols = cols;
     session.rows = rows;
@@ -120,7 +99,6 @@ export class SimpleTerminalManager extends EventEmitter {
   close(id: string): void {
     const session = this.sessions.get(id);
     if (!session) return;
-    
     try {
       session.pty.kill();
     } catch (error) {
@@ -137,14 +115,7 @@ export class SimpleTerminalManager extends EventEmitter {
   get(id: string): TerminalSession | undefined {
     const session = this.sessions.get(id);
     if (!session) return undefined;
-    
-    return {
-      id: session.id,
-      cwd: session.cwd,
-      cols: session.cols,
-      rows: session.rows,
-      createdAt: session.createdAt,
-    };
+    return { id: session.id, cwd: session.cwd, cols: session.cols, rows: session.rows, createdAt: session.createdAt };
   }
   
   /**
@@ -161,3 +132,5 @@ export class SimpleTerminalManager extends EventEmitter {
     return this.sessions.size;
   }
 }
+
+

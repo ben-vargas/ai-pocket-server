@@ -3,10 +3,10 @@
  * Wraps the existing file system service for Anthropic API compatibility
  */
 
+import { readdir, stat } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileSystemService } from '../../../file-system/service';
-import { resolve, join, dirname, basename } from 'node:path';
-import { stat, readdir } from 'node:fs/promises';
-import type { TextEditorTool, TextEditorCommand, ViewCommand, StrReplaceCommand, CreateCommand, InsertCommand } from '../types';
+import type { CreateCommand, InsertCommand, StrReplaceCommand, TextEditorCommand, TextEditorTool, ViewCommand } from '../types';
 
 /**
  * Text editor tool definition for Anthropic API

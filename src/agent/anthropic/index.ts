@@ -4,11 +4,11 @@
  */
 
 import type { Router } from '../../server/router';
-import type { WebSocketMessage } from '../../shared/types/api';
-import type { ClientMessage, ServerMessage } from './types';
-import { anthropicService } from './anthropic';
 import { wsManager } from '../../server/websocket';
+import type { WebSocketMessage } from '../../shared/types/api';
 import { sessionStoreFs } from '../store/session-store-fs';
+import { anthropicService } from './anthropic';
+import type { ClientMessage, ServerMessage } from './types';
 
 /**
  * Register agent routes with the router
