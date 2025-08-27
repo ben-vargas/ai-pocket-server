@@ -518,18 +518,14 @@ const server = serve({
   fetch: app.fetch,
   port,
   hostname: '0.0.0.0',
-}, () => {
-  console.log(`
-╔══════════════════════════════════════════════════════╗
-║                                                      ║
-║            Pocket Server - Node.js Edition          ║
-║                                                      ║
-║   🚀 Server running on port ${port}                    ║
-║   📡 WebSocket endpoint: ws://localhost:${port}/ws     ║
-║   💚 Health check: http://localhost:${port}/health     ║
-║                                                      ║
-╚══════════════════════════════════════════════════════╝
-  `);
+}, async () => {
+  // Import terminal UI utilities
+  const { createStartupBanner, createNetworkInfo } = await import('./shared/terminal-ui.js');
+  
+  // Show startup banner
+  const tunnelEnabled = !!process.env.CF_TUNNEL_NAME;
+  console.log(createStartupBanner(port, tunnelEnabled));
+  
   // Print local LAN URLs for convenience
   try {
     const nets = os.networkInterfaces();
@@ -542,10 +538,7 @@ const server = serve({
       });
     });
     if (urls.length) {
-      console.log('🔗 Local network URL(s):');
-      urls.forEach(u => {
-        console.log(`   • ${u}`);
-      });
+      console.log(createNetworkInfo(urls));
     }
   } catch {}
 });
@@ -554,8 +547,10 @@ const server = serve({
 injectWebSocket(server);
 
 // Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('\n📛 Shutting down gracefully...');
+process.on('SIGINT', async () => {
+  const { createShutdownBanner, colors } = await import('./shared/terminal-ui.js');
+  
+  console.log(createShutdownBanner());
   
   // Close all terminal sessions
   const sessions = terminalManager.getActiveSessions();
@@ -565,13 +560,13 @@ process.on('SIGINT', () => {
   
   // Close server
   server.close(() => {
-    console.log('👋 Server closed');
+    console.log(`${colors.brightGreen}✅ Server closed gracefully${colors.reset}`);
     process.exit(0);
   });
   
   // Force exit after 5 seconds
   setTimeout(() => {
-    console.log('⚠️  Forcing exit');
+    console.log(`${colors.brightRed}⚠️  Force exit - cleanup timeout${colors.reset}`);
     process.exit(1);
   }, 5000);
 });

@@ -14,10 +14,17 @@ function detectArch(): 'amd64' | 'arm64' {
   return 'amd64';
 }
 
+function detectOS(): 'darwin' | 'linux' {
+  if (process.platform === 'darwin') return 'darwin';
+  // Default to linux for non-darwin POSIX platforms
+  return 'linux';
+}
+
 function getDownloadUrl(): string {
   const arch = detectArch();
+  const os = detectOS();
   // Official release tgz with latest tag
-  return `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-${arch}.tgz`;
+  return `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${os}-${arch}.tgz`;
 }
 
 async function fetchBinary(): Promise<string> {

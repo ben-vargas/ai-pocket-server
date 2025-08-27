@@ -6,37 +6,13 @@ import { startPairingWindow } from './auth/pairing';
 import { logger } from './shared/logger';
 import { resolveDataPath } from './shared/paths';
 import { getPublicBaseUrl, setPublicBaseUrl } from './shared/public-url';
+import { createHelpDisplay, createPairingDisplay, status } from './shared/terminal-ui';
 import { startQuickTunnel } from './tunnel/cloudflare';
 
 const DEFAULT_PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 function printHelp(): void {
-  console.log(`
-Pocket Server - CLI
-
-Usage:
-  pocket-server <command> [flags]
-
-Commands:
-  start            Start the server
-  pair             Start the server and open pairing window
-  stop             Stop a running server
-  update           Update to the latest release via installer
-  help             Show this help
-
-Flags:
-  --port, -p <n>   Port to listen on (default: 3000 or $PORT)
-  --remote, -r     Start a Cloudflare quick tunnel to the local server
-  --duration <ms>  Pairing window duration in ms (pair only; default: 60000)
-  --pin <code>     Override generated PIN for pairing (pair only)
-  --help, -h       Show this help
-
-Examples:
-  pocket-server start
-  pocket-server start --port 3010
-  pocket-server start -p=3010 --remote
-  pocket-server pair --port 3010 --duration 120000
-`);
+  console.log(createHelpDisplay());
 }
 
 function parseArgs(argv: string[]): { cmd: string; flags: Record<string, string | boolean>; } {
@@ -69,24 +45,23 @@ function parseArgs(argv: string[]): { cmd: string; flags: Record<string, string 
     }
     if (a.startsWith('-')) {
       if (a === '-r') {
-        out['remote'] = true;
+        out.remote = true;
         continue;
       }
       if (a === '-h') {
-        out['help'] = true;
+        out.help = true;
         continue;
       }
       if (a.startsWith('-p=')) {
-        out['port'] = a.split('=')[1];
+        out.port = a.split('=')[1];
         continue;
       }
       if (a === '-p') {
         const next = rest[i + 1];
         if (next && !next.startsWith('-')) {
-          out['port'] = next;
+          out.port = next;
           i++;
         }
-        continue;
       }
     }
   }
@@ -98,7 +73,7 @@ async function startServer(port: number, enableTunnel: boolean): Promise<void> {
   setPublicBaseUrl(null);
   // Ensure server reads the desired port
   process.env.PORT = String(port);
-  console.log(`Starting Pocket Server on port ${port}${enableTunnel ? ' (remote tunnel enabled)' : ''}…`);
+  console.log(status.starting(port, enableTunnel));
   // Start server by importing index (side-effect)
   await import('./index.js');
   // Write PID
@@ -117,7 +92,7 @@ async function startServer(port: number, enableTunnel: boolean): Promise<void> {
         const found = getPublicBaseUrl();
         if (found && !printed) {
           logger.info('Tunnel', 'public_url_ready', { url: found });
-          console.log(`Public URL: ${found}`);
+          console.log(status.tunnelReady(found));
           printed = true;
           clearInterval(timer);
         }
@@ -125,7 +100,7 @@ async function startServer(port: number, enableTunnel: boolean): Promise<void> {
       const timer = setInterval(maybePrint, 1000);
       t.urlPromise.then((u) => { setPublicBaseUrl(u); maybePrint(); }).catch(() => {});
     } catch (e) {
-      console.error('Failed to start Cloudflare Tunnel:', (e as Error).message);
+      console.log(status.tunnelFailed((e as Error).message));
       setPublicBaseUrl(null);
     }
   }
@@ -161,33 +136,21 @@ async function cmdPair(flags: Record<string, string | boolean>): Promise<void> {
     });
   });
   const expiresInSec = Math.max(1, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
-  console.log(`\n════════════════════════════════════════════════════════`);
-  console.log(`  Pairing mode is ACTIVE (local network only)`);
-  console.log(`  PIN: ${pin}`);
-  console.log(`  Expires in: ${expiresInSec}s`);
-  if (urls.length) {
-    console.log(`  LAN URL(s):`);
-    urls.forEach(u => {
-      console.log(`   • ${u}`);
-    });
-  }
   const pub = getPublicBaseUrl();
-  if (pub) {
-    console.log(`  Note: Pairing is disabled over Cloudflare (${pub})`);
-  }
-  console.log(`════════════════════════════════════════════════════════\n`);
+  
+  console.log(`\n${createPairingDisplay(pin, expiresInSec, urls, !!pub)}\n`);
 }
 
 async function cmdStop(): Promise<void> {
   const pidPath = resolveDataPath('runtime', 'server.pid');
   if (!existsSync(pidPath)) {
-    console.log('No running server found.');
+    console.log(status.notRunning());
     return;
   }
   try {
     const pid = Number(readFileSync(pidPath, 'utf8'));
     process.kill(pid, 'SIGINT');
-    console.log(`Sent SIGINT to server PID ${pid}`);
+    console.log(status.stopping());
     try { unlinkSync(pidPath); } catch {}
   } catch (e) {
     console.error('Failed to stop server:', (e as Error).message);
@@ -197,7 +160,7 @@ async function cmdStop(): Promise<void> {
 async function cmdUpdate(): Promise<void> {
   // Delegate to installer script hosted on the website
   const installerUrl = process.env.POCKET_INSTALL_URL || 'https://www.pocket-agent.xyz/install';
-  console.log('Fetching and running installer to update…');
+  console.log(status.updating());
   const sh = spawn('/bin/bash', ['-lc', `curl -fsSL ${installerUrl} | bash`], { stdio: 'inherit' });
   await new Promise<void>((resolve, reject) => {
     sh.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`Installer exited with code ${code}`)));
@@ -221,7 +184,7 @@ async function main() {
     case 'update':
       return cmdUpdate();
     default:
-      console.log(`Unknown command: ${cmd}`);
+      console.log(status.unknownCommand(cmd));
       printHelp();
   }
 }

@@ -1,6 +1,7 @@
 /**
- * Simple logger utility
+ * Enhanced logger utility with terminal formatting
  */
+import { colors, formatCategory, formatLogLevel } from './terminal-ui';
 
 enum LogLevel {
   DEBUG = 0,
@@ -19,10 +20,13 @@ class Logger {
   private log(level: LogLevel, category: string, message: string, data?: any): void {
     if (level < this.level) return;
     const ts = new Date().toISOString();
-    // Unified single-line format: ts | LEVEL | category | message | json
-    const head = `${ts} | ${LogLevel[level].padEnd(5)} | ${category.padEnd(12)} | ${message}`;
-    const tail = data ? ` ${JSON.stringify(data)}` : '';
-    console.log(head + tail);
+    const timestamp = `${colors.gray}${ts}${colors.reset}`;
+    const levelStr = formatLogLevel(LogLevel[level]);
+    const categoryStr = formatCategory(category);
+    const messageStr = `${colors.bright}${message}${colors.reset}`;
+    const dataStr = data ? ` ${colors.dim}${JSON.stringify(data)}${colors.reset}` : '';
+    
+    console.log(`${timestamp} ${levelStr} ${categoryStr} ${messageStr}${dataStr}`);
   }
 
   debug(category: string, message: string, data?: any): void {
