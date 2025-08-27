@@ -46,9 +46,6 @@ jobs:
           - os: ubuntu-latest
             TARGET_OS: linux
             TARGET_ARCH: x64
-          - os: ubuntu-24.04-arm64
-            TARGET_OS: linux
-            TARGET_ARCH: arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -129,17 +126,17 @@ jobs:
           set -euo pipefail
           repo="${{ github.repository }}"
           ver="${{ steps.ver.outputs.version }}"
-          for os in darwin linux; do
-            for arch in arm64 x64; do
-              tgz="artifacts/tar-${os}-${arch}/pocket-server-${os}-${arch}.tar.gz" || true
-              sha="artifacts/sha-${os}-${arch}/pocket-server-${os}-${arch}.tar.gz.sha256" || true
-              meta="artifacts/meta-${os}-${arch}/meta-${os}-${arch}.json" || true
-              if [ -f "$tgz" ] && [ -f "$sha" ] && [ -f "$meta" ]; then
-                echo "[publish] Uploading $tgz ..."
-                gh release upload "$ver" "$tgz" --clobber
-                gh release upload "$ver" "$sha" --clobber
-              fi
-            done
+          for combo in "darwin arm64" "darwin x64" "linux x64"; do
+            os=$(echo "$combo" | awk '{print $1}')
+            arch=$(echo "$combo" | awk '{print $2}')
+            tgz="artifacts/tar-${os}-${arch}/pocket-server-${os}-${arch}.tar.gz" || true
+            sha="artifacts/sha-${os}-${arch}/pocket-server-${os}-${arch}.tar.gz.sha256" || true
+            meta="artifacts/meta-${os}-${arch}/meta-${os}-${arch}.json" || true
+            if [ -f "$tgz" ] && [ -f "$sha" ] && [ -f "$meta" ]; then
+              echo "[publish] Uploading $tgz ..."
+              gh release upload "$ver" "$tgz" --clobber
+              gh release upload "$ver" "$sha" --clobber
+            fi
           done
         env:
           GH_TOKEN: ${{ github.token }}
@@ -156,11 +153,10 @@ jobs:
             if [ -f "$shaPath" ]; then sha=$(cat "$shaPath"); else sha=""; fi
             printf '"%s-%s": {"url": "%s", "sha256": "%s"}' "$os" "$arch" "$url" "$sha"
           }
-          files=$(printf '{%s,%s,%s,%s}' \
+          files=$(printf '{%s,%s,%s}' \
             "$(make_entry darwin arm64)" \
             "$(make_entry darwin x64)" \
-            "$(make_entry linux x64)" \
-            "$(make_entry linux arm64)")
+            "$(make_entry linux x64)")
           printf '{"version":"%s","node":"%s","files":%s}' "$ver" "$nodeVer" "$files" | jq '.' > latest.json
           gh release upload "$ver" latest.json --clobber
           echo "Latest manifest uploaded: https://github.com/$repo/releases/download/$ver/latest.json"
