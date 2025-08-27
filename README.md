@@ -11,7 +11,7 @@ Pocket Server is the server component of Pocket Agent — a Claude Code‑style 
 - **Notifications**: opt‑in device notifications for task updates
 - **Secure pairing + tokens**: device PIN pairing (local‑only), short‑lived access tokens for HTTP/WS
 - **Remote access** via optional Cloudflare tunnel (`pocket-server start --remote`)
-- **Multi‑platform releases**: macOS (arm64/x64) and Linux (x64/arm64) with bundled Node v22.18.0
+- **Multi‑platform releases**: macOS (arm64), Linux and Mac Intel support coming soon — with bundled Node v22.18.0
 
 What you get
 ------------
@@ -19,7 +19,7 @@ What you get
 - Server‑authoritative conversations and sessions (no state in the app)
 - Event‑driven protocol over WebSocket (`/ws`) and REST endpoints (Hono)
 - Bundled Node.js runtime (v22.18.0) in releases — no system Node required
-- Multi‑architecture releases: macOS (arm64, x64) and Linux (x64, arm64)
+- Multi‑architecture releases: macOS (arm64) available now, Linux and Mac Intel support in development
 
 Install (recommended)
 ---------------------
@@ -44,7 +44,8 @@ pocket-server start
 pocket-server start --remote
 
 > Remote access notes
-> - macOS and Linux: `--remote` works out‑of‑the‑box. The CLI auto‑downloads `cloudflared` on first run (no account/config needed) and prints a public HTTPS URL.
+> - macOS (arm64): `--remote` works out‑of‑the‑box. The CLI auto‑downloads `cloudflared` on first run (no account/config needed) and prints a public HTTPS URL.
+> - Linux and Mac Intel: Remote access support coming soon
 ```
 
 Use it with the Pocket mobile app
