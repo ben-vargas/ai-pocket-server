@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execSync } from 'node:child_process';
-import { mkdirSync, rmSync, cpSync, readFileSync, writeFileSync, createReadStream } from 'node:fs';
+import { mkdirSync, rmSync, cpSync, readFileSync, writeFileSync, createReadStream, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -70,7 +70,9 @@ async function main() {
   // Lint critical rules with Biome (fast). Can be skipped in CI if a separate lint job gates the build.
   if (process.env.SKIP_LINT !== '1') {
     try {
+      console.log(`[release] Linting with Biome...`);
       exec('npm run lint', { cwd: serverDir });
+      console.log(`[release] Lint passed`);
     } catch (e) {
       console.error('\nBiome lint failed. Fix critical issues before releasing.');
       throw e;
@@ -79,14 +81,19 @@ async function main() {
 
   // Build server (clean first to avoid stale outputs)
   try { exec('rm -rf dist', { cwd: serverDir }); } catch {}
+  console.log(`[release] Installing dependencies (npm ci)...`);
   exec('npm ci', { cwd: serverDir });
+  console.log(`[release] Building server bundle...`);
   exec('npm run build', { cwd: serverDir });
   exec('npm prune --omit=dev', { cwd: serverDir });
+  console.log(`[release] Build complete`);
 
   // Smoke-test ESM imports in the compiled dist without starting the server
   try {
+    console.log(`[release] Verifying ESM bundle (quick import test)...`);
     const esmSmoke = `import('file://${serverDir}/dist/index.js').then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });`;
     exec(`POCKET_NO_START=1 node -e "${esmSmoke.replace(/"/g, '\\"')}"`);
+    console.log(`[release] ESM verification passed`);
   } catch (e) {
     console.error('\nESM smoke test failed. Inspect bundle and imports.');
     throw e;
@@ -95,30 +102,45 @@ async function main() {
   // Download Node runtime and copy node binary
   const nodePkg = `node-v${nodeVersion}-${targetOs}-${targetArch}`;
   const nodeTgz = join(tmpdir(), `${nodePkg}.tar.gz`);
-  exec(`curl -fsSLo ${nodeTgz} https://nodejs.org/dist/v${nodeVersion}/${nodePkg}.tar.gz`);
+  const progressFlag = process.env.CURL_PROGRESS === '0' ? '' : '--progress-bar';
+  const curlFlags = `${progressFlag} -L --fail --retry 3 --retry-delay 2`;
+  console.log(`[release] Downloading Node runtime ${nodePkg}...`);
+  exec(`curl ${curlFlags} -o ${nodeTgz} https://nodejs.org/dist/v${nodeVersion}/${nodePkg}.tar.gz`);
   exec(`tar -xzf ${nodeTgz} -C ${tmpdir()}`);
   cpSync(join(tmpdir(), nodePkg, 'bin', 'node'), join(buildBinDir, 'node'));
+  try {
+    const s = statSync(join(tmpdir(), nodePkg, 'bin', 'node'));
+    console.log(`[release] Node runtime ready (${(s.size/1024/1024).toFixed(1)} MB)`);
+  } catch {}
 
   // Copy app
+  console.log(`[release] Copying app files into staging dir...`);
   cpSync(resolve(serverDir, 'dist'), resolve(buildAppDir, 'dist'), { recursive: true });
   cpSync(resolve(serverDir, 'package.json'), resolve(buildAppDir, 'package.json'));
   cpSync(resolve(serverDir, 'node_modules'), resolve(buildAppDir, 'node_modules'), { recursive: true });
   writeFileSync(join(workRoot, 'VERSION'), version);
 
   // Pack
+  console.log(`[release] Packing tarball...`);
   exec(`tar -czf ${outTgz} -C ${workRoot} .`);
   const digest = await sha256(outTgz);
   const shaPath = `${outTgz}.sha256`;
   writeFileSync(shaPath, `${digest}`);
+  try {
+    const s = statSync(outTgz);
+    console.log(`[release] Packed ${(s.size/1024/1024).toFixed(1)} MB, sha256=${digest.slice(0,8)}...`);
+  } catch {}
 
   // Upload artifacts
   const artifactPath = `pocket-server/${version}/pocket-server-${osArchKey}.tar.gz`;
+  console.log(`[release] Uploading to Blob: ${artifactPath} ...`);
   const { url: tgzUrl } = await put(artifactPath, readFileSync(outTgz), {
     access: 'public', addRandomSuffix: false, token, contentType: 'application/gzip', cacheControlMaxAge: 31536000,
   });
   await put(`${artifactPath}.sha256`, readFileSync(shaPath), {
     access: 'public', addRandomSuffix: false, token, contentType: 'text/plain', cacheControlMaxAge: 31536000,
   });
+  console.log(`[release] Upload complete: ${tgzUrl}`);
 
   if (publishMode === 'full') {
     // Build manifest with only this target (legacy single-arch behavior)
@@ -144,7 +166,7 @@ async function main() {
     if (metadataPath) {
       const meta = { version, node: nodeVersion, os: targetOs, arch: targetArch, url: tgzUrl, sha256: digest };
       writeFileSync(metadataPath, JSON.stringify(meta, null, 2));
-      console.log(`\nWrote metadata: ${metadataPath}`);
+      console.log(`[release] Wrote metadata: ${metadataPath}`);
     }
     console.log('\nArtifact upload completed');
     console.log('Version:', version);
