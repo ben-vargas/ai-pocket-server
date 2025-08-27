@@ -1,11 +1,23 @@
 /**
  * Router adapter for Hono
  * Provides compatibility layer for modules expecting Router interface
+ *
+ * Why this exists: elsewhere in the codebase we register routes against a
+ * simple Router API (get/post/put/delete + optional pre-handler). Hono is our
+ * HTTP framework, but its Handler signature differs slightly. This adapter
+ * keeps route registration decoupled from Hono so we can test handlers in
+ * isolation and potentially swap frameworks without touching feature modules.
+ *
+ * Limitations: paths are exact-match only; no `:param` patterns yet. Add a
+ * thin pattern-matching layer here if/when needed so feature modules stay
+ * unchanged.
  */
 
 import { Hono } from 'hono';
 import { logger } from '../shared/logger';
 
+// Route handlers always receive the raw Request so modules do not depend on
+// framework-specific Context objects.
 type RouteHandler = (req: Request) => Promise<Response> | Response;
 
 interface Route {
@@ -26,6 +38,11 @@ export class Router {
   
   /**
    * Register a route
+   *
+   * Why: centralize error handling so feature handlers can be small and focus
+   * on business logic. The preHandler runs before the route for common checks
+   * (e.g., auth). Returning a Response from preHandler short-circuits the
+   * request.
    */
   add(method: string, path: string, handler: RouteHandler): void {
     const fullPath = this.prefix + path;

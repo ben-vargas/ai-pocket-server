@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'README.md'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Override version (e.g., v1.0.7)'
+        required: false
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install deps
+        run: npm ci
+      - name: Biome lint (server)
+        run: npm run lint
+
+  build:
+    needs: [lint]
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            TARGET_OS: darwin
+            TARGET_ARCH: arm64
+          - os: macos-13
+            TARGET_OS: darwin
+            TARGET_ARCH: x64
+          - os: ubuntu-latest
+            TARGET_OS: linux
+            TARGET_ARCH: x64
+          - os: ubuntu-24.04-arm64
+            TARGET_OS: linux
+            TARGET_ARCH: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install script deps (@vercel/blob)
+        run: npm install
+      - name: Build and upload artifact to Vercel Blob
+        run: node scripts/release.mjs
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          BLOB_MANIFEST_URL: ${{ vars.BLOB_MANIFEST_URL }}
+          INSTALL_MANIFEST_URL: ${{ vars.INSTALL_MANIFEST_URL }}
+          TARGET_OS: ${{ matrix.TARGET_OS }}
+          TARGET_ARCH: ${{ matrix.TARGET_ARCH }}
+          PUBLISH_MODE: artifacts-only
+          METADATA_PATH: ${{ github.workspace }}/meta-${{ matrix.TARGET_OS }}-${{ matrix.TARGET_ARCH }}.json
+          SKIP_LINT: '1'
+      - name: Upload metadata artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: meta-${{ matrix.TARGET_OS }}-${{ matrix.TARGET_ARCH }}
+          path: ${{ github.workspace }}/meta-${{ matrix.TARGET_OS }}-${{ matrix.TARGET_ARCH }}.json
+
+  publish:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install script deps (@vercel/blob)
+        run: npm install
+      - name: Download metadata artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: meta-*
+          path: artifacts
+      - name: Aggregate and publish manifest
+        run: node scripts/aggregate-manifest.mjs
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          META_DIR: ${{ github.workspace }}/artifacts
+
+
