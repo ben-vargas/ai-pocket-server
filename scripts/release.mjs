@@ -131,18 +131,19 @@ async function main() {
     console.log(`[release] Packed ${(s.size/1024/1024).toFixed(1)} MB, sha256=${digest.slice(0,8)}...`);
   } catch {}
 
-  // Upload artifacts
-  const artifactPath = `pocket-server/${version}/pocket-server-${osArchKey}.tar.gz`;
-  console.log(`[release] Uploading to Blob: ${artifactPath} ...`);
-  const { url: tgzUrl } = await put(artifactPath, readFileSync(outTgz), {
-    access: 'public', addRandomSuffix: false, token, contentType: 'application/gzip', cacheControlMaxAge: 31536000,
-  });
-  await put(`${artifactPath}.sha256`, readFileSync(shaPath), {
-    access: 'public', addRandomSuffix: false, token, contentType: 'text/plain', cacheControlMaxAge: 31536000,
-  });
-  console.log(`[release] Upload complete: ${tgzUrl}`);
+  // If artifacts-only mode, stop here after writing files; the workflow will upload
 
   if (publishMode === 'full') {
+    // Legacy single-arch publish: upload directly to Blob (kept for local use only)
+    const artifactPath = `pocket-server/${version}/pocket-server-${osArchKey}.tar.gz`;
+    console.log(`[release] Uploading to Blob: ${artifactPath} ...`);
+    const { url: tgzUrl } = await put(artifactPath, readFileSync(outTgz), {
+      access: 'public', addRandomSuffix: false, token, contentType: 'application/gzip', cacheControlMaxAge: 31536000,
+    });
+    await put(`${artifactPath}.sha256`, readFileSync(shaPath), {
+      access: 'public', addRandomSuffix: false, token, contentType: 'text/plain', cacheControlMaxAge: 31536000,
+    });
+    console.log(`[release] Upload complete: ${tgzUrl}`);
     // Build manifest with only this target (legacy single-arch behavior)
     const manifest = {
       version,
@@ -164,7 +165,7 @@ async function main() {
   } else {
     // Artifacts-only: write metadata JSON for the aggregator
     if (metadataPath) {
-      const meta = { version, node: nodeVersion, os: targetOs, arch: targetArch, url: tgzUrl, sha256: digest };
+      const meta = { version, node: nodeVersion, os: targetOs, arch: targetArch, url: '', sha256: digest };
       writeFileSync(metadataPath, JSON.stringify(meta, null, 2));
       console.log(`[release] Wrote metadata: ${metadataPath}`);
     }
