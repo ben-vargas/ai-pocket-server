@@ -4,7 +4,6 @@ import { mkdirSync, rmSync, cpSync, readFileSync, writeFileSync, createReadStrea
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { put } from '@vercel/blob';
 
 function exec(cmd, opts = {}) {
   return execSync(cmd, { stdio: 'inherit', ...opts });
@@ -24,11 +23,7 @@ async function main() {
   const repoRoot = resolve(process.cwd());
   const serverDir = repoRoot; // server repo root
 
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) {
-    console.error('Missing env BLOB_READ_WRITE_TOKEN');
-    process.exit(1);
-  }
+  // No external uploads here; this script only builds artifacts in CI.
 
   // Target selection (defaults to host platform/arch). Allows CI matrix to override.
   const targetOs = process.env.TARGET_OS || (process.platform === 'darwin' ? 'darwin' : (process.platform === 'linux' ? 'linux' : 'darwin'));
@@ -131,48 +126,19 @@ async function main() {
     console.log(`[release] Packed ${(s.size/1024/1024).toFixed(1)} MB, sha256=${digest.slice(0,8)}...`);
   } catch {}
 
-  // If artifacts-only mode, stop here after writing files; the workflow will upload
+  // Make artifacts available at a stable path (repo root) for the workflow to upload
+  const outTgzRepo = join(repoRoot, `pocket-server-${osArchKey}.tar.gz`);
+  const shaPathRepo = `${outTgzRepo}.sha256`;
+  try { cpSync(outTgz, outTgzRepo); } catch {}
+  try { writeFileSync(shaPathRepo, `${digest}`); } catch {}
 
-  if (publishMode === 'full') {
-    // Legacy single-arch publish: upload directly to Blob (kept for local use only)
-    const artifactPath = `pocket-server/${version}/pocket-server-${osArchKey}.tar.gz`;
-    console.log(`[release] Uploading to Blob: ${artifactPath} ...`);
-    const { url: tgzUrl } = await put(artifactPath, readFileSync(outTgz), {
-      access: 'public', addRandomSuffix: false, token, contentType: 'application/gzip', cacheControlMaxAge: 31536000,
-    });
-    await put(`${artifactPath}.sha256`, readFileSync(shaPath), {
-      access: 'public', addRandomSuffix: false, token, contentType: 'text/plain', cacheControlMaxAge: 31536000,
-    });
-    console.log(`[release] Upload complete: ${tgzUrl}`);
-    // Build manifest with only this target (legacy single-arch behavior)
-    const manifest = {
-      version,
-      node: nodeVersion,
-      files: {
-        [osArchKey]: { url: tgzUrl, sha256: digest },
-      }
-    };
-
-    const { url: uploadedManifestUrl } = await put('pocket-server/latest.json', Buffer.from(JSON.stringify(manifest, null, 2)), {
-      access: 'public', addRandomSuffix: false, allowOverwrite: true, token, contentType: 'application/json', cacheControlMaxAge: 60,
-    });
-
-    console.log('\nRelease completed');
-    console.log('Version:', version);
-    console.log('Tarball:', tgzUrl);
-    console.log('Manifest:', uploadedManifestUrl);
-    console.log('\nSet INSTALL_MANIFEST_URL to the Manifest URL if not already set.');
-  } else {
-    // Artifacts-only: write metadata JSON for the aggregator
-    if (metadataPath) {
-      const meta = { version, node: nodeVersion, os: targetOs, arch: targetArch, url: '', sha256: digest };
-      writeFileSync(metadataPath, JSON.stringify(meta, null, 2));
-      console.log(`[release] Wrote metadata: ${metadataPath}`);
-    }
-    console.log('\nArtifact upload completed');
-    console.log('Version:', version);
-    console.log('Tarball:', tgzUrl);
+  // Write metadata JSON for the publish step
+  if (metadataPath) {
+    const meta = { version, node: nodeVersion, os: targetOs, arch: targetArch, url: '', sha256: digest };
+    writeFileSync(metadataPath, JSON.stringify(meta, null, 2));
+    console.log(`[release] Wrote metadata: ${metadataPath}`);
   }
+  console.log(`\nArtifacts ready:\n  ${outTgzRepo}\n  ${shaPathRepo}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
