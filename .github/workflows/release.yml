@@ -92,8 +92,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install tools
-        run: |
-          npm install --global jq
+        run: echo "No extra tools required"
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -157,7 +156,7 @@ jobs:
             "$(make_entry darwin arm64)" \
             "$(make_entry darwin x64)" \
             "$(make_entry linux x64)")
-          printf '{"version":"%s","node":"%s","files":%s}' "$ver" "$nodeVer" "$files" | jq '.' > latest.json
+          printf '{"version":"%s","node":"%s","files":%s}' "$ver" "$nodeVer" "$files" > latest.json
           gh release upload "$ver" latest.json --clobber
           echo "Latest manifest uploaded: https://github.com/$repo/releases/download/$ver/latest.json"
         env:
