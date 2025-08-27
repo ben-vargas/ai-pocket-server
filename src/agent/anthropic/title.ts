@@ -4,13 +4,15 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
+import type { RequestOptionsWithRetry } from './client';
 
 /**
  * Generate a title for a conversation based on the first message
  */
 export async function generateTitle(
   anthropic: Anthropic,
-  userMessage: string
+  userMessage: string,
+  requestOptions?: RequestOptionsWithRetry
 ): Promise<string> {
   try {
     const response = await anthropic.messages.create({
@@ -21,7 +23,7 @@ export async function generateTitle(
         role: 'user',
         content: `Generate a short title (max 3 words) for a conversation that starts with: "${userMessage}". Return only the title, no quotes or punctuation.`
       }]
-    });
+    }, requestOptions);
     
     const content = response.content[0];
     if (content.type === 'text') {
@@ -35,7 +37,35 @@ export async function generateTitle(
     }
     
     return 'New Chat';
-  } catch (error: any) {
+  } catch (error: unknown) {
+    // Handle OAuth 401 once by refreshing and retrying
+    const status = (error as { status?: number; code?: number; response?: { status?: number } }).status
+      ?? (error as { status?: number; code?: number; response?: { status?: number } }).code
+      ?? (error as { status?: number; code?: number; response?: { status?: number } }).response?.status;
+    if ((status === 401 || status === 403) && requestOptions?.__refreshAndRetry) {
+      try {
+        await requestOptions.__refreshAndRetry();
+        const response = await anthropic.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 20,
+          temperature: 0.7,
+          messages: [{
+            role: 'user',
+            content: `Generate a short title (max 3 words) for a conversation that starts with: "${userMessage}". Return only the title, no quotes or punctuation.`
+          }]
+        }, requestOptions);
+        const content = response.content[0];
+        if (content.type === 'text') {
+          const title = content.text.trim();
+          const words = title.split(' ').filter(Boolean);
+          if (words.length > 3) return words.slice(0, 3).join(' ');
+          return title;
+        }
+        return 'New Chat';
+      } catch (_e2) {
+        // fall through to fallback title
+      }
+    }
     console.error('[TitleGenerator] Error generating title:', error.message);
     // Fallback to a simple title based on content
     return generateFallbackTitle(userMessage);

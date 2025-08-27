@@ -4,6 +4,7 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
+import type { RequestOptionsWithRetry } from './client';
 import { executeBash, isBashCommandDangerous } from './tools/bash';
 import { executeEditor, isEditorCommandDangerous } from './tools/editor';
 import { executeWebSearch } from './tools/web-search';
@@ -40,8 +41,10 @@ export async function processStream(
   onToolResultProcessed: (toolId: string, output: string, isError: boolean) => Promise<void>,
   onStateUpdated: ((state: StreamingState) => void) | undefined,
   anthropic: Anthropic,
-  streamConfig: any
+  streamConfig: any,
+  requestOptions?: RequestOptionsWithRetry
 ): Promise<StreamingState> {
+  type MinimalStream = AsyncIterable<unknown> & { finalMessage: () => Promise<any> };
   // Initialize streaming state
   const state: StreamingState = {
     currentMessage: null,
@@ -68,8 +71,21 @@ export async function processStream(
   try {
     console.log(`[Streaming] Starting async iteration for session: ${sessionId}`);
     
-    // Create the stream
-    const stream = anthropic.messages.stream(streamConfig);
+    // Create the stream (with optional OAuth headers)
+    let stream: MinimalStream;
+    try {
+      stream = anthropic.messages.stream(streamConfig, requestOptions);
+    } catch (e) {
+      const status = (e as { status?: number; code?: number; response?: { status?: number } }).status
+        ?? (e as { status?: number; code?: number; response?: { status?: number } }).code
+        ?? (e as { status?: number; code?: number; response?: { status?: number } }).response?.status;
+      if ((status === 401 || status === 403) && requestOptions?.__refreshAndRetry) {
+        await requestOptions.__refreshAndRetry();
+        stream = anthropic.messages.stream(streamConfig, requestOptions);
+      } else {
+        throw e;
+      }
+    }
     
     // Process events using async iteration - THE ONLY PATTERN THAT WORKS
     for await (const event of stream) {

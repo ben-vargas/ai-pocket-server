@@ -4,6 +4,8 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { getAuthContext } from './client';
+import { OAUTH_IDENTITY_LINE } from './oauth/credentials';
 import { generateSystemPrompt } from './prompt';
 import { processStream } from './streaming';
 import { generateTitle } from './title';
@@ -23,6 +25,7 @@ import type {
 
 export class AnthropicService {
   private anthropic: Anthropic | null = null;
+  private currentApiKey: string | undefined;
   private sessions = new Map<string, AgentSession>();
   private cleanupInterval: NodeJS.Timeout | null = null;
 
@@ -35,8 +38,9 @@ export class AnthropicService {
    * Initialize Anthropic client with API key
    */
   private initClient(apiKey: string): Anthropic {
-    if (!this.anthropic || this.anthropic.apiKey !== apiKey) {
+    if (!this.anthropic || this.currentApiKey !== apiKey) {
       this.anthropic = new Anthropic({ apiKey });
+      this.currentApiKey = apiKey;
     }
     return this.anthropic;
   }
@@ -114,10 +118,12 @@ export class AnthropicService {
     session.phase = 'starting';
     onMessage({ type: 'agent:status', sessionId, phase: 'starting' } as any);
     
+    // Resolve auth context once per request
+    let auth = await getAuthContext({ messageApiKey: apiKey });
+
     // Generate title for first message and persist
     if (session.conversation.messages.length === 0) {
-      const anthropic = this.initClient(apiKey);
-      const title = await generateTitle(anthropic, content);
+      const title = await generateTitle(auth.anthropic, content, auth.requestOptions);
       session.conversation.title = title;
       try { await (await import('../store/session-store-fs.js')).sessionStoreFs.updateTitle(sessionId, title); } catch {}
       onMessage({ type: 'agent:title', sessionId, title });
@@ -134,7 +140,10 @@ export class AnthropicService {
     onMessage({ type: 'agent:status', sessionId, phase: 'ready' } as any);
 
     // Create system prompt
-    const systemPrompt = generateSystemPrompt({ workingDirectory: workingDir });
+    let systemPrompt = generateSystemPrompt({ workingDirectory: workingDir });
+    if (auth.isOauth) {
+      systemPrompt = `${OAUTH_IDENTITY_LINE}\n\n${systemPrompt}`;
+    }
 
     // Prepare tools
     const tools = [bashToolDefinition, editorToolDefinition, webSearchToolDefinition];
@@ -148,7 +157,8 @@ export class AnthropicService {
 
       // Use Anthropic SDK's natural streaming pattern
       console.log(`[AnthropicService] Starting SDK stream for session: ${sessionId}`);
-      const anthropic = this.initClient(apiKey);
+      // ensure the latest auth context (and valid token if oauth)
+      auth = await getAuthContext({ messageApiKey: apiKey });
       
       // Prepare stream configuration
       const streamConfig = {
@@ -197,8 +207,9 @@ export class AnthropicService {
             s.phase = state.isStreaming ? 'streaming' : (state.error ? 'error' : 'ready');
           }
         },
-        anthropic,
-        streamConfig
+        auth.anthropic,
+        streamConfig,
+        auth.requestOptions as any
       );
       
       console.log(`[AnthropicService] SDK stream processing completed for session: ${sessionId}`);
@@ -218,7 +229,8 @@ export class AnthropicService {
       // If in Max mode (auto-approval), we must continue the conversation for each queued tool request
       // by sending a single user message containing all tool_result blocks, then stream the assistant's continuation.
       if (maxMode && (streamingState.autoToolRequests && streamingState.autoToolRequests.length > 0)) {
-        const anthropic = this.initClient(apiKey);
+        // refresh auth (token may have changed)
+        auth = await getAuthContext({ messageApiKey: apiKey });
 
         // Execute all queued tools and build tool_result blocks
         const toolResults = [] as any[];
@@ -483,7 +495,11 @@ export class AnthropicService {
     apiKey: string,
     onMessage: (msg: ServerMessage) => void
   ): Promise<void> {
-    const systemPrompt = generateSystemPrompt({ workingDirectory: session.workingDir });
+    let systemPrompt = generateSystemPrompt({ workingDirectory: session.workingDir });
+    const auth = await getAuthContext({ messageApiKey: apiKey });
+    if (auth.isOauth) {
+      systemPrompt = `${OAUTH_IDENTITY_LINE}\n\n${systemPrompt}`;
+    }
     const tools = [bashToolDefinition, editorToolDefinition, webSearchToolDefinition];
 
     try {
@@ -494,7 +510,7 @@ export class AnthropicService {
       session.currentStreamController = new AbortController();
 
       // Continue with Anthropic SDK's natural streaming pattern
-      const anthropic = this.initClient(apiKey);
+      // auth context (may be oauth or api key)
       const streamConfig = {
         model: 'claude-sonnet-4-20250514',
         max_tokens: 4096,
@@ -531,8 +547,9 @@ export class AnthropicService {
           session.lastActivity = new Date();
           session.phase = state.isStreaming ? 'streaming' : (state.error ? 'error' : 'ready');
         },
-        anthropic,
-        streamConfig
+        auth.anthropic,
+        streamConfig,
+        auth.requestOptions as any
       );
 
       // Update session
@@ -635,8 +652,8 @@ export class AnthropicService {
     message: string,
     apiKey: string
   ): Promise<string> {
-    const anthropic = this.initClient(apiKey);
-    return generateTitle(anthropic, message);
+    const auth = await getAuthContext({ messageApiKey: apiKey });
+    return generateTitle(auth.anthropic, message, auth.requestOptions as any);
   }
 
   /**

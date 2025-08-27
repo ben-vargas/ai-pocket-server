@@ -114,6 +114,13 @@ npm run build
 npm start
 ```
 
+OAuth (Claude Code)
+-------------------
+
+- Modes via `ANTHROPIC_AUTH_MODE`: `oauth`, `api_key`, `oauth_then_api_key`, `api_key_then_oauth` (default `api_key`).
+- OAuth credentials are read from `~/.claude/.credentials.json` (or `CLAUDE_CREDENTIALS_PATH`).
+- In OAuth mode, headers use `Authorization: Bearer <access_token>`, `anthropic-version: 2023-06-01`, and default `anthropic-beta` includes Claude Code betas.
+- The system prompt is augmented with: "You are Claude Code, Anthropic's official CLI for Claude." when using OAuth.
 Environment
 -----------
 

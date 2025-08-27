@@ -35,18 +35,9 @@ export async function handleAgentWebSocket(
 ): Promise<void> {
   const clientMessage = message as ClientMessage;
   
-  // Extract API key from message or use environment variable
+  // Extract possible API key from message or environment for api_key modes.
+  // OAuth modes do not require a key; service will resolve auth context.
   const apiKey = message.apiKey || process.env.ANTHROPIC_API_KEY;
-  
-  if (!apiKey) {
-    const errorMessage: ServerMessage = {
-      type: 'agent:error',
-      sessionId: clientMessage.sessionId,
-      error: 'No API key provided. Please provide apiKey in message or set ANTHROPIC_API_KEY environment variable.'
-    };
-    ws.send(JSON.stringify(errorMessage));
-    return;
-  }
 
   // Message callback to send responses back through WebSocket with envelope
   const sendMessage = async (msg: ServerMessage) => {
@@ -83,11 +74,11 @@ export async function handleAgentWebSocket(
   try {
     switch (clientMessage.type) {
       case 'agent:message':
-        await anthropicService.processMessage(clientMessage, apiKey, (m) => { void sendMessage(m); });
+        await anthropicService.processMessage(clientMessage, apiKey || '', (m) => { void sendMessage(m); });
         break;
         
       case 'agent:tool_response':
-        await anthropicService.processToolResponse(clientMessage, apiKey, sendMessage);
+        await anthropicService.processToolResponse(clientMessage, apiKey || '', sendMessage);
         break;
         
       case 'agent:stop':
@@ -132,15 +123,8 @@ async function handleGenerateTitle(req: Request): Promise<Response> {
       });
     }
     
-    const effectiveApiKey = apiKey || process.env.ANTHROPIC_API_KEY;
-    if (!effectiveApiKey) {
-      return new Response(JSON.stringify({ error: 'API key required' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    
-    const title = await anthropicService.generateTitle(message, effectiveApiKey);
+    const effectiveApiKey = apiKey || process.env.ANTHROPIC_API_KEY || undefined;
+    const title = await anthropicService.generateTitle(message, effectiveApiKey || '');
     
     return new Response(JSON.stringify({ title }), {
       headers: { 'Content-Type': 'application/json' }
