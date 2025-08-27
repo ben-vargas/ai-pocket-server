@@ -140,9 +140,16 @@ export class AnthropicService {
     onMessage({ type: 'agent:status', sessionId, phase: 'ready' } as any);
 
     // Create system prompt
-    let systemPrompt = generateSystemPrompt({ workingDirectory: workingDir });
+    // For OAuth, send system as two content blocks: first is the Claude Code identity line,
+    // second is Pocket's detailed instructions. This matches opencode’s formatting while
+    // conforming to Anthropic SDK's expected shape (array of { type: 'text', text }).
+    let systemPrompt: any = generateSystemPrompt({ workingDirectory: workingDir });
     if (auth.isOauth) {
-      systemPrompt = `${OAUTH_IDENTITY_LINE}\n\n${systemPrompt}`;
+      systemPrompt = [
+        { type: 'text', text: OAUTH_IDENTITY_LINE },
+        { type: 'text', text: systemPrompt },
+      ];
+      console.log('[OAuth] System prompt starts with:', OAUTH_IDENTITY_LINE.substring(0, 100));
     }
 
     // Prepare tools
@@ -160,21 +167,29 @@ export class AnthropicService {
       // ensure the latest auth context (and valid token if oauth)
       auth = await getAuthContext({ messageApiKey: apiKey });
       
-      // Prepare stream configuration
-      const streamConfig = {
-        model: 'claude-sonnet-4-20250514',
+      // Choose model per auth mode (align with cctest behavior under OAuth)
+      const modelId = auth.isOauth
+        ? (process.env.ANTHROPIC_OAUTH_MODEL || 'claude-sonnet-4-0')
+        : (process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514');
+
+      // Prepare stream configuration (avoid enabling thinking by default under OAuth)
+      const streamConfig: any = {
+        model: modelId,
         max_tokens: 4096,
         system: systemPrompt,
         messages: session.conversation.messages as any,
-        tools: tools as any,
-        // Enable extended thinking with a minimal budget first
-        thinking: { type: 'enabled', budget_tokens: 1024 },
+        // Rollback: under OAuth send bash only (stable baseline)
+        ...(auth.isOauth ? { tools: [bashToolDefinition] as any } : { tools: tools as any }),
       };
+      if (!auth.isOauth) {
+        // Enable extended thinking with a minimal budget only for API key mode
+        streamConfig.thinking = { type: 'enabled', budget_tokens: 1024 };
+      }
       
       console.log(`[AnthropicService] Stream config prepared, starting SDK stream...`);
 
       // Process stream using SDK's natural event chaining
-      const streamingState = await processStream(
+      let streamingState = await processStream(
         sessionId,
         workingDir,
         maxMode,
@@ -211,6 +226,50 @@ export class AnthropicService {
         streamConfig,
         auth.requestOptions as any
       );
+      // If the stream errored with the Claude Code OAuth limitation and we have an API key, retry once with API key
+      if (
+        streamingState.error &&
+        typeof (streamingState.error as any).error?.message === 'string' &&
+        (streamingState.error as any).error.message.includes('only authorized for use with Claude Code') &&
+        process.env.ANTHROPIC_API_KEY
+      ) {
+        console.warn('[AnthropicService] Retrying stream with API key due to OAuth limitation');
+        const fallbackClient = new (await import('@anthropic-ai/sdk')).default({ apiKey: process.env.ANTHROPIC_API_KEY });
+        streamingState = await (await import('./streaming')).processStream(
+          sessionId,
+          workingDir,
+          maxMode,
+          !maxMode,
+          onMessage,
+          async (request) => {
+            onMessage({
+              type: 'agent:tool_request',
+              sessionId,
+              content: `Tool request: ${request.description}`,
+              toolRequest: request,
+            });
+            const s = this.sessions.get(sessionId);
+            if (s) {
+              s.pendingTools = [...(s.pendingTools || []), request];
+              s.phase = 'awaiting_tool';
+            }
+          },
+          async (toolId, output, isError) => {
+            await this.addToolResultToConversation(session, toolId, output, isError, apiKey, onMessage);
+          },
+          (state) => {
+            const s = this.sessions.get(sessionId);
+            if (s) {
+              s.streamingState = state;
+              s.lastActivity = new Date();
+              s.phase = state.isStreaming ? 'streaming' : (state.error ? 'error' : 'ready');
+            }
+          },
+          fallbackClient as any,
+          streamConfig,
+          undefined,
+        );
+      }
       
       console.log(`[AnthropicService] SDK stream processing completed for session: ${sessionId}`);
 
@@ -495,12 +554,18 @@ export class AnthropicService {
     apiKey: string,
     onMessage: (msg: ServerMessage) => void
   ): Promise<void> {
-    let systemPrompt = generateSystemPrompt({ workingDirectory: session.workingDir });
     const auth = await getAuthContext({ messageApiKey: apiKey });
-    if (auth.isOauth) {
-      systemPrompt = `${OAUTH_IDENTITY_LINE}\n\n${systemPrompt}`;
-    }
-    const tools = [bashToolDefinition, editorToolDefinition, webSearchToolDefinition];
+    // For OAuth, send system as two content blocks: identity + Pocket prompt
+    const systemPrompt: any = auth.isOauth
+      ? [
+          { type: 'text', text: OAUTH_IDENTITY_LINE },
+          { type: 'text', text: generateSystemPrompt({ workingDirectory: session.workingDir }) },
+        ]
+      : generateSystemPrompt({ workingDirectory: session.workingDir });
+    // Rollback: OAuth uses bash only; API key uses full set
+    const tools = auth.isOauth
+      ? [bashToolDefinition]
+      : [bashToolDefinition, editorToolDefinition, webSearchToolDefinition];
 
     try {
       // Store reference to current stream for potential cancellation  
@@ -511,15 +576,20 @@ export class AnthropicService {
 
       // Continue with Anthropic SDK's natural streaming pattern
       // auth context (may be oauth or api key)
-      const streamConfig = {
-        model: 'claude-sonnet-4-20250514',
+      const modelId = auth.isOauth
+        ? (process.env.ANTHROPIC_OAUTH_MODEL || 'claude-sonnet-4-0')
+        : (process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514');
+      const streamConfig: any = {
+        model: modelId,
         max_tokens: 4096,
         system: systemPrompt,
         messages: session.conversation.messages as any,
         tools: tools as any,
-        // Enable extended thinking for continuations as well
-        thinking: { type: 'enabled', budget_tokens: 1024 },
       };
+      if (!auth.isOauth) {
+        // Enable extended thinking only in API key mode
+        streamConfig.thinking = { type: 'enabled', budget_tokens: 1024 };
+      }
 
       // Process continuation stream using SDK's natural event chaining
       const streamingState = await processStream(

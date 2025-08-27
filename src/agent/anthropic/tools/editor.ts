@@ -12,7 +12,8 @@ import type { CreateCommand, InsertCommand, StrReplaceCommand, TextEditorCommand
  * Text editor tool definition for Anthropic API
  */
 export const editorToolDefinition: TextEditorTool = {
-  type: 'text_editor_20250429',
+  // Use a broadly supported editor schema version compatible with Sonnet 4/3.5
+  type: 'text_editor_20250124',
   name: 'str_replace_based_edit_tool'
 };
 

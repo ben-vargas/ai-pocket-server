@@ -3,7 +3,7 @@
  * Uses async iteration pattern - the only pattern that works with Bun
  */
 
-import type Anthropic from '@anthropic-ai/sdk';
+import Anthropic from '@anthropic-ai/sdk';
 import type { RequestOptionsWithRetry } from './client';
 import { executeBash, isBashCommandDangerous } from './tools/bash';
 import { executeEditor, isEditorCommandDangerous } from './tools/editor';
@@ -60,6 +60,7 @@ export async function processStream(
   let allAccumulatedContent = '';
   let currentBlockContent = '';
   let messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  let lastStopReason: string | null = null;
   
   // Track tool use blocks being built
   let currentToolUse: any = null;
@@ -74,14 +75,29 @@ export async function processStream(
     // Create the stream (with optional OAuth headers)
     let stream: MinimalStream;
     try {
-      stream = anthropic.messages.stream(streamConfig, requestOptions);
+      // Use messages.create with stream: true to match known-good patterns
+      const body = { ...streamConfig, stream: true } as any;
+      stream = (await anthropic.messages.create(body, requestOptions)) as unknown as MinimalStream;
     } catch (e) {
       const status = (e as { status?: number; code?: number; response?: { status?: number } }).status
         ?? (e as { status?: number; code?: number; response?: { status?: number } }).code
         ?? (e as { status?: number; code?: number; response?: { status?: number } }).response?.status;
+      const msg = (e as any)?.message || (e as any)?.error?.message || '';
       if ((status === 401 || status === 403) && requestOptions?.__refreshAndRetry) {
         await requestOptions.__refreshAndRetry();
-        stream = anthropic.messages.stream(streamConfig, requestOptions);
+        const body = { ...streamConfig, stream: true } as any;
+        stream = (await anthropic.messages.create(body, requestOptions)) as unknown as MinimalStream;
+      } else if (
+        status === 400 &&
+        typeof msg === 'string' &&
+        msg.includes('only authorized for use with Claude Code') &&
+        process.env.ANTHROPIC_API_KEY
+      ) {
+        // Fallback to API key for this request only
+        console.warn('[Streaming] OAuth credential rejected for this request; falling back to API key for streaming');
+        const fallbackClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const body = { ...streamConfig, stream: true } as any;
+        stream = (await fallbackClient.messages.create(body)) as unknown as MinimalStream;
       } else {
         throw e;
       }
@@ -231,6 +247,7 @@ export async function processStream(
           
         case 'message_delta':
           console.log(`[Streaming] Message delta: stop_reason=${event.delta.stop_reason}`);
+          lastStopReason = event.delta.stop_reason ?? lastStopReason ?? null;
           break;
           
         case 'message_stop':
@@ -266,8 +283,24 @@ export async function processStream(
       }
     }
     
-    // Get the final message after stream completes
-    const finalMessage = await stream.finalMessage();
+    // Get the final message after stream completes (SDK stream or build from state)
+    let finalMessage: any;
+    const maybeFinal = (stream as any)?.finalMessage;
+    if (typeof maybeFinal === 'function') {
+      finalMessage = await maybeFinal.call(stream);
+    } else {
+      // Build a minimal final message from accumulated state
+      finalMessage = {
+        id: messageId,
+        type: 'message',
+        role: 'assistant',
+        content: state.contentBlocks as any,
+        model: (state.currentMessage as any)?.model || '',
+        stop_reason: lastStopReason ?? 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      };
+    }
     console.log(`[Streaming] Got final message with ${finalMessage.content.length} content blocks`);
     
     // Send the complete final message (keep the same id as the message_start for dedupe on client)
@@ -327,7 +360,7 @@ async function executeToolLocally(request: ToolRequest, workingDir: string): Pro
     if (request.name === 'bash') {
       return await executeBash(request.input, workingDir);
     }
-    if (request.name === 'str_replace_based_edit_tool') {
+    if (request.name === 'str_replace_editor' || request.name === 'str_replace_based_edit_tool') {
       return await executeEditor(request.input, workingDir);
     }
     if (request.name === 'web_search') {
@@ -347,6 +380,7 @@ function isToolSafe(request: ToolRequest): boolean {
   switch (request.name) {
     case 'bash':
       return !isBashCommandDangerous(request.input?.command || '');
+    case 'str_replace_editor':
     case 'str_replace_based_edit_tool':
       return !isEditorCommandDangerous(request.input);
     case 'web_search':

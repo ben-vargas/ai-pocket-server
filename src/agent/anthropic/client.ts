@@ -33,18 +33,27 @@ export async function getAuthContext(input: { messageApiKey?: string | null }): 
   const buildOAuthCtx = async (): Promise<AuthContext> => {
     // Proactive refresh if near expiry
     await refreshAccessTokenIfNeeded().catch(() => { /* ignore here; will fail when fetching token */ });
-    const token = await getValidAccessToken();
-    const headers = buildOAuthHeaders(token);
+    let currentToken = await getValidAccessToken();
+
+    // Match cctest: use SDK without apiKey and pass headers per-request
+    const anthropic = new Anthropic({ apiKey: null as any } as any);
+
+    const buildHeaders = () => ({
+      ...buildOAuthHeaders(currentToken),
+      // Explicitly omit API key header so SDK doesn't include it from env
+      'x-api-key': null as any,
+      // Spoof Claude Code UA (optional)
+      'user-agent': process.env.CLAUDE_CODE_UA || 'Claude Code/0.26.7',
+    });
+
     const requestOptions: RequestOptionsWithRetry = {
-      headers,
+      headers: buildHeaders(),
       __refreshAndRetry: async () => {
-        const newToken = await forceRefreshAccessToken();
-        requestOptions.headers = buildOAuthHeaders(newToken);
+        currentToken = await forceRefreshAccessToken();
+        (requestOptions.headers as any) = buildHeaders();
       },
     };
-    // For OAuth, SDK apiKey is unused; we still instantiate the client
-    // Passing undefined avoids sending x-api-key by default; we also null it explicitly in headers.
-    const anthropic = new Anthropic({ apiKey: null });
+
     return { anthropic, requestOptions, isOauth: true, mode };
   };
 

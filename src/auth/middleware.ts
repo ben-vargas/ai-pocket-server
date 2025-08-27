@@ -33,6 +33,8 @@ export function isLocalRequest(req: Request, publicHost?: string | null): boolea
     const b = Number(parts[1]);
     if (a === 172 && b >= 16 && b <= 31) return true;
     if (a === 192 && b === 168) return true;
+    // Tailscale uses 100.x.x.x range (100.0.0.0/8)
+    if (a === 100) return true;
     return false;
   } catch {
     return false;

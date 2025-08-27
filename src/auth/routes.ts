@@ -44,11 +44,12 @@ export function registerAuthRoutes(router: Router): void {
     }
   });
 
-  // Public: pair device (local-only, window, PIN)
+  // Public: pair device (local-only including Tailscale, window, PIN)
   router.post('/pair', async (req) => {
     if (!isPairingActive()) {
       return new Response(JSON.stringify({ success: false, error: 'pairing_not_active' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
     }
+    // Re-enabled with Tailscale support: allows RFC1918 + Tailscale 100.x.x.x
     const publicHost = getPublicBaseUrl();
     if (!isLocalRequest(req, publicHost)) {
       return new Response(JSON.stringify({ success: false, error: 'pairing_not_local' }), { status: 403, headers: { 'Content-Type': 'application/json' } });

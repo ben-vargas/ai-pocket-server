@@ -4,7 +4,9 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
+import AnthropicSdk from '@anthropic-ai/sdk';
 import type { RequestOptionsWithRetry } from './client';
+import { OAUTH_IDENTITY_LINE } from './oauth/credentials';
 
 /**
  * Generate a title for a conversation based on the first message
@@ -15,15 +17,18 @@ export async function generateTitle(
   requestOptions?: RequestOptionsWithRetry
 ): Promise<string> {
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514', // Use Sonnet 4 for title generation to align with agent model
+    const isOauth = Boolean(requestOptions);
+    const req: any = {
+      model: isOauth ? 'claude-sonnet-4-0' : 'claude-sonnet-4-20250514', // Match OAuth default model when using OAuth
       max_tokens: 20,
       temperature: 0.7,
       messages: [{
         role: 'user',
         content: `Generate a short title (max 3 words) for a conversation that starts with: "${userMessage}". Return only the title, no quotes or punctuation.`
       }]
-    }, requestOptions);
+    };
+    if (isOauth) req.system = OAUTH_IDENTITY_LINE;
+    const response = await anthropic.messages.create(req, requestOptions);
     
     const content = response.content[0];
     if (content.type === 'text') {
@@ -42,10 +47,11 @@ export async function generateTitle(
     const status = (error as { status?: number; code?: number; response?: { status?: number } }).status
       ?? (error as { status?: number; code?: number; response?: { status?: number } }).code
       ?? (error as { status?: number; code?: number; response?: { status?: number } }).response?.status;
+    const errMsg = (error as any)?.message || (error as any)?.error?.message || '';
     if ((status === 401 || status === 403) && requestOptions?.__refreshAndRetry) {
       try {
         await requestOptions.__refreshAndRetry();
-        const response = await anthropic.messages.create({
+        const req2: any = {
           model: 'claude-sonnet-4-20250514',
           max_tokens: 20,
           temperature: 0.7,
@@ -53,7 +59,9 @@ export async function generateTitle(
             role: 'user',
             content: `Generate a short title (max 3 words) for a conversation that starts with: "${userMessage}". Return only the title, no quotes or punctuation.`
           }]
-        }, requestOptions);
+        };
+        req2.system = OAUTH_IDENTITY_LINE;
+        const response = await anthropic.messages.create(req2, requestOptions);
         const content = response.content[0];
         if (content.type === 'text') {
           const title = content.text.trim();
@@ -66,7 +74,39 @@ export async function generateTitle(
         // fall through to fallback title
       }
     }
-    console.error('[TitleGenerator] Error generating title:', error.message);
+    // If OAuth credential is not usable for non-Claude-Code requests, try API key fallback when available
+    if (
+      status === 400 &&
+      requestOptions &&
+      typeof errMsg === 'string' &&
+      errMsg.includes('only authorized for use with Claude Code')
+    ) {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (apiKey) {
+        try {
+          const apiClient = new (AnthropicSdk as any)({ apiKey });
+          const response = await apiClient.messages.create({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 20,
+            temperature: 0.7,
+            messages: [{
+              role: 'user',
+              content: `Generate a short title (max 3 words) for a conversation that starts with: "${userMessage}". Return only the title, no quotes or punctuation.`
+            }]
+          });
+          const content = response.content[0];
+          if (content.type === 'text') {
+            const title = content.text.trim();
+            const words = title.split(' ').filter(Boolean);
+            if (words.length > 3) return words.slice(0, 3).join(' ');
+            return title;
+          }
+        } catch {
+          // continue to fallback
+        }
+      }
+    }
+    console.error('[TitleGenerator] Error generating title:', (error as any).message);
     // Fallback to a simple title based on content
     return generateFallbackTitle(userMessage);
   }

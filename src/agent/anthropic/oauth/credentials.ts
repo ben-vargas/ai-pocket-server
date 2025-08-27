@@ -20,8 +20,10 @@ export type Credentials = {
   token_type?: string;
 };
 
-// Default betas for OAuth (Claude Code), oauth must come first
-export const DEFAULT_OAUTH_BETAS = 'oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14';
+// Default betas for OAuth (Claude Code), oauth must come first.
+// Keep minimal by default to match working patterns from cctest.
+export const DEFAULT_OAUTH_BETAS = process.env.ANTHROPIC_OAUTH_BETAS
+  || 'oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14';
 
 export function getCredentialsPath(): string {
   const override = process.env.CLAUDE_CREDENTIALS_PATH;
@@ -48,7 +50,25 @@ export async function loadCredentials(): Promise<{ path: string; creds: Credenti
   const path = getCredentialsPath();
   try {
     const raw = await fs.readFile(path, 'utf8');
-    const creds = JSON.parse(raw) as Credentials;
+    const parsed = JSON.parse(raw);
+    
+    // Handle nested Claude Code structure
+    let creds: Credentials;
+    if (parsed.claudeAiOauth) {
+      // New Claude Code structure: { claudeAiOauth: { accessToken, refreshToken, expiresAt, ... } }
+      const oauth = parsed.claudeAiOauth;
+      creds = {
+        access_token: oauth.accessToken,
+        refresh_token: oauth.refreshToken,
+        expires_at: oauth.expiresAt,
+      };
+    } else if (parsed.access_token) {
+      // Direct structure
+      creds = parsed as Credentials;
+    } else {
+      throw new Error('Invalid credentials format');
+    }
+    
     _cachedPath = path;
     _cachedCreds = creds;
     return { path, creds };
@@ -59,10 +79,36 @@ export async function loadCredentials(): Promise<{ path: string; creds: Credenti
   }
 }
 
-async function atomicWrite(path: string, data: unknown): Promise<void> {
+async function atomicWrite(path: string, data: Credentials): Promise<void> {
   const tmp = `${path}.tmp`;
   await fs.mkdir(dirname(path), { recursive: true });
-  await fs.writeFile(tmp, JSON.stringify(data), 'utf8');
+  
+  // Read existing file to preserve structure
+  let output: any;
+  try {
+    const existing = await fs.readFile(path, 'utf8');
+    const parsed = JSON.parse(existing);
+    if (parsed.claudeAiOauth) {
+      // Update nested structure
+      output = {
+        ...parsed,
+        claudeAiOauth: {
+          ...parsed.claudeAiOauth,
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token,
+          expiresAt: data.expires_at,
+        }
+      };
+    } else {
+      // Direct structure
+      output = data;
+    }
+  } catch {
+    // File doesn't exist or is invalid, write direct structure
+    output = data;
+  }
+  
+  await fs.writeFile(tmp, JSON.stringify(output, null, 2), 'utf8');
   await fs.rename(tmp, path);
 }
 
@@ -133,9 +179,9 @@ async function safeText(res: Response): Promise<string> {
   try { return await res.text(); } catch { return `${res.status}`; }
 }
 
-export function buildOAuthHeaders(accessToken: string): Record<string, string | null> {
+export function buildOAuthHeaders(accessToken: string): Record<string, string> {
   return {
-    'x-api-key': null, // ensure SDK does not send API key header
+    'content-type': 'application/json',
     authorization: `Bearer ${accessToken}`,
     'anthropic-version': '2023-06-01',
     'anthropic-beta': DEFAULT_OAUTH_BETAS,
