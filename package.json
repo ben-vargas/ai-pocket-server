@@ -32,11 +32,10 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.0",
-    "@vercel/blob": "^0.25.1",
     "@types/cors": "^2.8.17",
     "@types/node": "^20.11.17",
     "@types/ws": "^8.5.13",
-    "esbuild": "^0.21.5",
+    "esbuild": "^0.25.9",
     "tsx": "^4.7.1",
     "typescript": "^5.8.3"
   },
