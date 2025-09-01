@@ -124,7 +124,32 @@ export const notificationsService = {
     }));
     await sendExpoPush(messages);
   },
+
+  async notifyAgentPlanProgress(input: {
+    deviceId: string;
+    sessionId: string;
+    sessionTitle: string;
+    kind: 'created' | 'next' | 'completed';
+    stepIndex: number; // 1-based when kind !== 'completed'
+    total: number;
+    taskTitle: string;
+  }): Promise<void> {
+    const devices = loadDevices();
+    const target = devices.find(d => d.deviceId === input.deviceId);
+    if (!target) return;
+    const title = input.sessionTitle || 'Agent';
+    const body = input.kind === 'completed'
+      ? `Completed ${input.total}/${input.total} steps`
+      : `Step ${input.stepIndex}/${input.total} — ${truncate(input.taskTitle, 120)}`;
+    const url = `/chat?sessionId=${encodeURIComponent(input.sessionId)}`;
+    await sendExpoPush([{ to: target.expoPushToken, title, body, data: { url, sessionId: input.sessionId, kind: input.kind } }]);
+  },
 };
+
+function truncate(s: string, n: number): string {
+  if (!s) return s;
+  return s.length <= n ? s : (s.slice(0, n - 1) + '…');
+}
 
 export function registerNotificationRoutes(router: Router): void {
   // Protect notifications routes
@@ -159,5 +184,3 @@ export function registerNotificationRoutes(router: Router): void {
     }
   });
 }
-
-

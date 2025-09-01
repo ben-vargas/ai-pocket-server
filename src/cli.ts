@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from 'child_process';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
+import fuzzysort from 'fuzzysort';
 import os from 'os';
+import WebSocket from 'ws';
 import { startPairingWindow } from './auth/pairing';
 import { logger } from './shared/logger';
 import { resolveDataPath } from './shared/paths';
@@ -15,11 +17,30 @@ function printHelp(): void {
   console.log(createHelpDisplay());
 }
 
-function parseArgs(argv: string[]): { cmd: string; flags: Record<string, string | boolean>; } {
+function parseArgs(argv: string[]): { cmd: string; subcmd?: string; flags: Record<string, string | boolean>; } {
   const out: Record<string, string | boolean> = {};
   const cmd = argv[0] && !argv[0].startsWith('-') ? argv[0] : 'start';
+  let subcmd: string | undefined;
   const rest = argv[0] === cmd ? argv.slice(1) : argv.slice(0);
+  let skipIndex: number | null = null;
+  if (cmd === 'terminal' && rest.length > 0 && !rest[0].startsWith('-')) {
+    const candidate = rest[0];
+    if (candidate === 'sessions' || candidate === 'attach' || candidate === 'select') {
+      subcmd = candidate;
+      // Optional positional query after subcmd (e.g., terminal attach opencode)
+      if (rest[1] && !rest[1].startsWith('-')) {
+        out.query = rest[1];
+        skipIndex = 1;
+      }
+    } else {
+      // Treat as positional query (e.g., terminal opencode)
+      out.query = candidate;
+      skipIndex = 0;
+    }
+  }
   for (let i = 0; i < rest.length; i++) {
+    if (i === 0 && subcmd) continue; // skip the subcommand token
+    if (skipIndex !== null && i === skipIndex) continue; // skip the positional query token
     const a = rest[i];
     if (a === '--') break;
     if (a.startsWith('--')) {
@@ -28,15 +49,11 @@ function parseArgs(argv: string[]): { cmd: string; flags: Record<string, string 
       if (rawV !== undefined) {
         out[k] = rawV;
       } else {
-        // support space-separated values: --port 3010
+        // generic support space-separated values: --key value
         const next = rest[i + 1];
-        if (k === 'port' || k === 'duration' || k === 'pin') {
-          if (next && !next.startsWith('-')) {
-            out[k] = next;
-            i++;
-          } else {
-            // missing value -> ignore, will fallback later
-          }
+        if (next && !next.startsWith('-')) {
+          out[k] = next;
+          i++;
         } else {
           out[k] = true;
         }
@@ -65,7 +82,7 @@ function parseArgs(argv: string[]): { cmd: string; flags: Record<string, string 
       }
     }
   }
-  return { cmd, flags: out };
+  return { cmd, subcmd, flags: out };
 }
 
 async function startServer(port: number, enableTunnel: boolean): Promise<void> {
@@ -168,8 +185,336 @@ async function cmdUpdate(): Promise<void> {
   });
 }
 
+async function cmdTerminal(flags: Record<string, string | boolean>, subcmd?: string): Promise<void> {
+  const action = subcmd || (hasAnySelectorFlag(flags) ? 'select' : 'sessions');
+  switch (action) {
+    case 'sessions': {
+      const path = resolveDataPath('runtime', 'term-sessions.json');
+      if (!existsSync(path)) {
+        console.log('No active terminal sessions.');
+        return;
+      }
+      try {
+        const raw = readFileSync(path, 'utf8');
+        const data = JSON.parse(raw) as { sessions?: Array<TerminalRegistryItem>; updatedAt?: number };
+        let sessions = Array.isArray(data.sessions) ? data.sessions.slice() : [];
+        const sortKey = typeof flags.sort === 'string' ? String(flags.sort) : 'smart';
+        sessions = sortSessions(sessions, sortKey);
+        if (flags.json) {
+          // include 1-based index in JSON
+          const enriched = sessions.map((s, i) => ({ index: i + 1, ...s }));
+          console.log(JSON.stringify({ sessions: enriched }, null, 2));
+          return;
+        }
+        if (sessions.length === 0) {
+          console.log('No active terminal sessions.');
+          return;
+        }
+        const long = Boolean(flags.long);
+        const lines: string[] = [];
+        sessions.forEach((s, idx) => {
+          lines.push(formatSessionLine(s, idx + 1, long));
+        });
+        console.log(lines.join('\n'));
+      } catch (e) {
+        console.error('Failed to read terminal sessions:', (e as Error).message);
+      }
+      return;
+    }
+    case 'select':
+    case 'attach': {
+      // Selection flow: try by index/name/id/positional
+      const selected = await selectSession(flags);
+      if (!selected) return;
+      const port = flags.port ? Number(flags.port) : DEFAULT_PORT;
+      if (!Number.isFinite(port) || port < 1 || port > 65535) {
+        console.error(`Invalid port: ${flags.port}`);
+        return;
+      }
+      await attachToSession(selected.session.id, selected.session.title || deriveTitleFromId(selected.session.id), port);
+      return;
+    }
+    default:
+      console.log(status.unknownCommand(`terminal ${action}`));
+  }
+}
+
+function deriveTitleFromId(id: string): string {
+  const m = id.match(/#(\d+)$/);
+  if (m) return `Terminal ${m[1]}`;
+  return 'Terminal';
+}
+
+function compactPath(p: string): string {
+  try {
+    const home = os.homedir();
+    if (p.startsWith(home)) return '~' + p.slice(home.length);
+  } catch {}
+  return p;
+}
+
+type TerminalRegistryItem = {
+  id: string;
+  title?: string;
+  cwd: string;
+  createdAt: number;
+  cols?: number;
+  rows?: number;
+  active: boolean;
+  ownerClientId?: string;
+  ownerDeviceId?: string;
+  lastAttachedAt?: number;
+};
+
+function hasAnySelectorFlag(flags: Record<string, string | boolean>): boolean {
+  return Boolean(flags.name || flags.id || flags.index || flags.pick || flags.query) || false;
+}
+
+function sortSessions(sessions: TerminalRegistryItem[], sort: string): TerminalRegistryItem[] {
+  // smart: active desc, lastAttachedAt desc, createdAt asc
+  const smart = (a: TerminalRegistryItem, b: TerminalRegistryItem) => {
+    if (a.active !== b.active) return a.active ? -1 : 1;
+    const la = a.lastAttachedAt || 0;
+    const lb = b.lastAttachedAt || 0;
+    if (la !== lb) return lb - la;
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  };
+  const created = (a: TerminalRegistryItem, b: TerminalRegistryItem) => (a.createdAt || 0) - (b.createdAt || 0);
+  const attached = (a: TerminalRegistryItem, b: TerminalRegistryItem) => (b.lastAttachedAt || 0) - (a.lastAttachedAt || 0);
+  const title = (a: TerminalRegistryItem, b: TerminalRegistryItem) => (a.title || deriveTitleFromId(a.id)).localeCompare(b.title || deriveTitleFromId(b.id), undefined, { sensitivity: 'base' });
+  const sorter = sort === 'created' ? created : sort === 'attached' ? attached : sort === 'title' ? title : smart;
+  return sessions.sort(sorter);
+}
+
+function formatSessionLine(s: TerminalRegistryItem, index: number, long: boolean): string {
+  const title = s.title || deriveTitleFromId(s.id);
+  const cwd = compactPath(s.cwd);
+  const size = s.cols && s.rows ? `${s.cols}x${s.rows}` : '';
+  const active = s.active ? 'active' : 'inactive';
+  const owner = s.ownerDeviceId ? ` · device:${s.ownerDeviceId}` : '';
+  const idPart = long ? ` · id=${s.id}` : '';
+  return `[${index}] ${title}:${idPart}${size ? ` · ${size}` : ''} · ${active} · ${cwd}${owner}`;
+}
+
+async function selectSession(flags: Record<string, string | boolean>): Promise<{ index: number; session: TerminalRegistryItem } | null> {
+  const path = resolveDataPath('runtime', 'term-sessions.json');
+  if (!existsSync(path)) {
+    console.log('No active terminal sessions.');
+    return null;
+  }
+  let sessions: TerminalRegistryItem[] = [];
+  try {
+    const raw = readFileSync(path, 'utf8');
+    const data = JSON.parse(raw) as { sessions?: Array<TerminalRegistryItem> };
+    sessions = Array.isArray(data.sessions) ? data.sessions.slice() : [];
+  } catch (e) {
+    console.error('Failed to read terminal sessions:', (e as Error).message);
+    return null;
+  }
+  if (sessions.length === 0) {
+    console.log('No active terminal sessions.');
+    return null;
+  }
+  const sortKey = typeof flags.sort === 'string' ? String(flags.sort) : 'smart';
+  sessions = sortSessions(sessions, sortKey);
+
+  // Direct index
+  if (typeof flags.index === 'string' && /^\d+$/.test(flags.index)) {
+    const idx = Math.max(1, parseInt(String(flags.index), 10));
+    if (idx <= sessions.length) return { index: idx, session: sessions[idx - 1] };
+    console.log(`Index out of range. Choose 1..${sessions.length}`);
+    return null;
+  }
+
+  // Name / ID flags
+  const name = typeof flags.name === 'string' ? String(flags.name) : undefined;
+  const id = typeof flags.id === 'string' ? String(flags.id) : undefined;
+  const positional = typeof flags.query === 'string' ? String(flags.query) : undefined;
+  // If positional is a number, treat as index
+  if (positional && /^\d+$/.test(positional)) {
+    const idx = Math.max(1, parseInt(positional, 10));
+    if (idx <= sessions.length) return { index: idx, session: sessions[idx - 1] };
+    console.log(`Index out of range. Choose 1..${sessions.length}`);
+    return null;
+  }
+  const query = name || id || positional;
+  if (query) {
+    const res = resolveQuery(sessions, query, Boolean(id));
+    if (res) return res;
+    console.log(`No match for ${query}`);
+    return null;
+  }
+
+  // No flags; interactive if TTY or print list with indices
+  if (process.stdin.isTTY && process.stdout.isTTY && (Boolean(flags.pick) || Boolean(flags.query))) {
+    return await interactivePick(sessions);
+  }
+  // If user provided a positional search term (after 'attach'), try it too
+  // parseArgs already mapped subcmd; we don't keep the extra positional. As a convenience,
+  // allow --pick (interactive) or show the list prompt.
+  console.log('Provide a selector: --index N | --name "Title" | --id term:... or use --pick for interactive.');
+  sessions.forEach((s, i) => {
+    console.log(formatSessionLine(s, i + 1, false));
+  });
+  return null;
+}
+
+function resolveQuery(sessions: TerminalRegistryItem[], q: string, idOnly: boolean): { index: number; session: TerminalRegistryItem } | null {
+  const lower = q.toLowerCase();
+  const exactId = sessions.findIndex(s => s.id === q);
+  if (exactId >= 0) return { index: exactId + 1, session: sessions[exactId] };
+  if (!idOnly) {
+    // Exact title (case-insensitive)
+    const exactTitle = sessions.findIndex(s => (s.title || deriveTitleFromId(s.id)).toLowerCase() === lower);
+    if (exactTitle >= 0) return { index: exactTitle + 1, session: sessions[exactTitle] };
+    // Prefix title
+    const prefixTitle = sessions.findIndex(s => (s.title || deriveTitleFromId(s.id)).toLowerCase().startsWith(lower));
+    if (prefixTitle >= 0) return { index: prefixTitle + 1, session: sessions[prefixTitle] };
+    // Fuzzy
+    const results = fuzzysort.go(lower, sessions, {
+      keys: ['title', 'id', 'cwd'],
+      threshold: -10000,
+      allowTypo: true,
+      all: true,
+    } as any);
+    if (results && results.length > 0) {
+      const best = results[0].obj as TerminalRegistryItem;
+      const idx = sessions.findIndex(s => s.id === best.id);
+      if (idx >= 0) return { index: idx + 1, session: sessions[idx] };
+    }
+  }
+  return null;
+}
+
+async function interactivePick(sessions: TerminalRegistryItem[]): Promise<{ index: number; session: TerminalRegistryItem } | null> {
+  sessions.forEach((s, i) => {
+    console.log(formatSessionLine(s, i + 1, false));
+  });
+  const rl = await import('readline');
+  const r = rl.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q: string) => new Promise<string>(resolve => r.question(q, resolve));
+  try {
+    const answer = (await ask('Select index (q to cancel): ')).trim();
+    if (!answer || /^q$/i.test(answer)) return null;
+    const idx = parseInt(answer, 10);
+    if (!Number.isFinite(idx) || idx < 1 || idx > sessions.length) {
+      console.log('Invalid selection.');
+      return null;
+    }
+    return { index: idx, session: sessions[idx - 1] };
+  } finally {
+    r.close();
+  }
+}
+
+async function attachToSession(id: string, title: string, port: number): Promise<void> {
+  // Prefer using local secret query param for deterministic local access
+  let url = `ws://127.0.0.1:${port}/ws`;
+  try {
+    const keyPath = resolveDataPath('runtime', 'local-ws.key');
+    const secret = readFileSync(keyPath, 'utf8').trim();
+    if (secret) {
+      url = `ws://127.0.0.1:${port}/ws?local=${encodeURIComponent(secret)}`;
+    }
+  } catch {}
+  const ws = new WebSocket(url);
+  let closed = false;
+  let resizeSeq = 0;
+
+  const cleanup = () => {
+    if ((process.stdin as any).isTTY) {
+      try { (process.stdin as any).setRawMode(false); } catch {}
+    }
+    try { process.stdin.pause(); } catch {}
+  };
+
+  const send = (msg: any) => {
+    try { ws.send(JSON.stringify({ ...msg, timestamp: Date.now() })); } catch {}
+  };
+
+  const sendResize = () => {
+    const cols = process.stdout.columns || 80;
+    const rows = process.stdout.rows || 24;
+    resizeSeq++;
+    send({ type: 'term:resize', payload: { id, cols, rows, seq: resizeSeq } });
+  };
+
+  ws.on('open', () => {
+    console.log(`Attaching to ${title} (id=${id}) — Ctrl+C to detach`);
+    // Attach to the session; backlog will follow
+    send({ type: 'term:attach', payload: { id } });
+
+    // Start raw input
+    if ((process.stdin as any).isTTY) {
+      try { (process.stdin as any).setRawMode(true); } catch {}
+    }
+    process.stdin.resume();
+    process.stdin.on('data', (buf: Buffer) => {
+      if (closed) return;
+      // Ctrl+C detach
+      if (buf.length === 1 && buf[0] === 0x03) { // ^C
+        closed = true;
+        try { ws.close(); } catch {}
+        cleanup();
+        console.log('\nDetached.');
+        return;
+      }
+      send({ type: 'term:input', payload: { id, data: buf.toString('utf8') } });
+    });
+    // For server (desktop) attach: do not send any PTY resize events.
+  });
+
+  ws.on('message', (data: WebSocket.RawData) => {
+    if (closed) return;
+    try {
+      const msg = JSON.parse(data.toString());
+      switch (msg?.type) {
+        case 'term:frame':
+          if (msg.payload?.data) {
+            process.stdout.write(msg.payload.data);
+          }
+          break;
+        case 'term:opened':
+          // Desktop attach: do not send an initial resize; rely on app's existing PTY size
+          break;
+        case 'term:exit': {
+          const code = msg?.payload?.code;
+          console.log(`\n[process exited with code ${code}]`);
+          closed = true;
+          cleanup();
+          try { ws.close(); } catch {}
+          break;
+        }
+        default:
+          break;
+      }
+    } catch {}
+  });
+
+  ws.on('close', (code: number, reasonBuf: Buffer) => {
+    const reason = reasonBuf?.toString?.() || '';
+    if (!closed) {
+      closed = true;
+      cleanup();
+      if (code) {
+        console.log(`\nDisconnected (code=${code}${reason ? `, reason=${reason}` : ''}).`);
+      } else {
+        console.log('\nDisconnected.');
+      }
+    }
+  });
+
+  ws.on('error', (err) => {
+    if (!closed) {
+      closed = true;
+      cleanup();
+      console.error('WebSocket error:', (err as any)?.message || err);
+    }
+  });
+}
+
 async function main() {
-  const { cmd, flags } = parseArgs(process.argv.slice(2));
+  const { cmd, subcmd, flags } = parseArgs(process.argv.slice(2));
   if (flags.help || cmd === 'help') {
     printHelp();
     return;
@@ -183,6 +528,8 @@ async function main() {
       return cmdStop();
     case 'update':
       return cmdUpdate();
+    case 'terminal':
+      return cmdTerminal(flags, subcmd);
     default:
       console.log(status.unknownCommand(cmd));
       printHelp();
@@ -193,5 +540,3 @@ main().catch(err => {
   console.error(err);
   process.exit(1);
 });
-
-

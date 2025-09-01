@@ -10,6 +10,7 @@ import { generateTitle } from './title';
 import { bashToolDefinition, executeBash } from './tools/bash';
 import { editorToolDefinition, executeEditor } from './tools/editor';
 import { executeWebSearch, webSearchToolDefinition } from './tools/web-search';
+import { executeWorkPlan, workPlanToolDefinition } from './tools/work-plan';
 import type { 
   AgentSession, 
   ClientMessage, 
@@ -63,7 +64,7 @@ export class AnthropicService {
           },
           settings: {
             maxTokens: 4096,
-            tools: [bashToolDefinition, editorToolDefinition, webSearchToolDefinition]
+            tools: [bashToolDefinition, editorToolDefinition, webSearchToolDefinition, workPlanToolDefinition]
           }
         },
         streamingState: {
@@ -137,7 +138,7 @@ export class AnthropicService {
     const systemPrompt = generateSystemPrompt({ workingDirectory: workingDir });
 
     // Prepare tools
-    const tools = [bashToolDefinition, editorToolDefinition, webSearchToolDefinition];
+    const tools = [bashToolDefinition, editorToolDefinition, webSearchToolDefinition, workPlanToolDefinition];
 
     try {
       // Store reference to current stream for potential cancellation
@@ -237,6 +238,10 @@ export class AnthropicService {
                 break;
               case 'web_search':
                 output = await executeWebSearch(req.input, workingDir);
+                isError = false;
+                break;
+              case 'work_plan':
+                output = await executeWorkPlan(sessionId, req.input);
                 isError = false;
                 break;
               default:
@@ -386,6 +391,10 @@ export class AnthropicService {
             result = await executeWebSearch(toolUse.input, session.workingDir);
             isError = false;
             break;
+          case 'work_plan':
+            result = await executeWorkPlan(session.id, toolUse.input);
+            isError = false;
+            break;
           default:
             result = `Unknown tool: ${toolUse.name}`;
             isError = true;
@@ -484,7 +493,7 @@ export class AnthropicService {
     onMessage: (msg: ServerMessage) => void
   ): Promise<void> {
     const systemPrompt = generateSystemPrompt({ workingDirectory: session.workingDir });
-    const tools = [bashToolDefinition, editorToolDefinition, webSearchToolDefinition];
+    const tools = [bashToolDefinition, editorToolDefinition, webSearchToolDefinition, workPlanToolDefinition];
 
     try {
       // Store reference to current stream for potential cancellation  
@@ -564,6 +573,10 @@ export class AnthropicService {
                 break;
               case 'web_search':
                 output = await executeWebSearch(req.input, session.workingDir);
+                isError = false;
+                break;
+              case 'work_plan':
+                output = await executeWorkPlan(session.id, req.input);
                 isError = false;
                 break;
               default:

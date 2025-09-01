@@ -12,6 +12,7 @@ import os from 'os';
 import { resolve } from 'path';
 import type { WebSocket as WSWebSocket } from 'ws';
 import { handleAgentMessage, registerAgentModule } from './agent/index';
+import { getLocalWsSecretFast, getOrCreateLocalWsSecret } from './auth/local-ws';
 import { verifyAuthFromRequest } from './auth/middleware';
 import { registerAuthRoutes } from './auth/routes';
 import { registerBackgroundAgentCursor } from './background-agent/cursor/index';
@@ -22,6 +23,8 @@ import { wsManager } from './server/websocket';
 import { logger } from './shared/logger';
 import { getPublicBaseUrl, setPublicBaseUrl } from './shared/public-url';
 import type { TerminalFramePayload, WebSocketMessage } from './shared/types/api';
+import { TerminalRegistry } from './terminal/registry';
+import { registerTerminalRoutes } from './terminal/routes';
 import { TerminalManager } from './terminal/terminal-manager';
 
 // Initialize Hono app
@@ -31,6 +34,8 @@ const app = new Hono();
 // an outdated value in dev runs that don't start cloudflared.
 // Safe: when cloudflared starts, it will set a fresh URL again.
 try { setPublicBaseUrl(null); } catch {}
+// Ensure local WS secret exists for CLI attaches
+try { getOrCreateLocalWsSecret(); } catch {}
 
 // Middleware
 app.use('*', cors());
@@ -43,7 +48,6 @@ app.route('/agent', agentRouter.getApp());
 const fsRouter = createRouter('');
 registerFileSystemRoutes(fsRouter);
 app.route('/fs', fsRouter.getApp());
-
 
 // Cloud background agents (Cursor)
 const cloudRouter = createRouter('');
@@ -62,6 +66,12 @@ app.route('/auth', authRouter.getApp());
 
 // Initialize simple terminal manager
 const terminalManager = new TerminalManager();
+const terminalRegistry = new TerminalRegistry();
+
+// Terminal routes (sessions listing)
+const termRouter = createRouter('');
+registerTerminalRoutes(termRouter, terminalManager, terminalRegistry);
+app.route('/terminal', termRouter.getApp());
 
 // Map terminal session id -> clientId to route data to the originating client only
 const termClientMap = new Map<string, string>();
@@ -164,6 +174,7 @@ terminalManager.on('data', ({ id, data }) => {
   buf.chunks.push(data);
   buf.bytes += data.length;
   try { appendBacklog(id, data); } catch {}
+  try { terminalRegistry.upsert({ id, active: true }); } catch {}
 
   // Flush immediately if frame grows large
   if (buf.bytes >= MAX_FRAME_BYTES) {
@@ -202,6 +213,7 @@ terminalManager.on('exit', ({ id, code }) => {
     const entry = backlogMap.get(id);
     if (entry) entry.exited = { code, ts: Date.now() };
   } catch {}
+  try { terminalRegistry.setActive(id, false); } catch {}
 });
 
 // HTTP Routes
@@ -252,21 +264,31 @@ const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 app.get('/ws', 
   upgradeWebSocket((c) => {
     const clientId = crypto.randomUUID();
-    // Verify token from query before accepting upgrade
+    // Verify token or local secret from query before accepting upgrade
     const url = new URL(c.req.url);
     const token = url.searchParams.get('token') || '';
+    const localSecret = url.searchParams.get('local') || '';
     const fakeReq = new Request(c.req.url, { headers: { Authorization: token ? `Pocket ${token}` : '' } });
     // Note: upgradeWebSocket hook doesn't allow async gating directly; we validate in onOpen and close if invalid.
     return {
       onOpen(_evt, ws) {
         (async () => {
-          const res = await verifyAuthFromRequest(fakeReq);
-          if (!res.ok) {
-            try { (ws as any).close(4401, res.reason); } catch {}
+          let deviceId: string | null = null;
+          if (token) {
+            const res = await verifyAuthFromRequest(fakeReq);
+            if (res.ok) deviceId = res.deviceId;
+          }
+          if (!deviceId && localSecret) {
+            const secret = getLocalWsSecretFast() || getOrCreateLocalWsSecret();
+            if (secret && localSecret === secret) deviceId = 'local-cli';
+          }
+          if (!deviceId) {
+            logger.websocket('auth_reject', clientId, { reason: 'missing_or_invalid', tokenPresent: Boolean(token) });
+            try { (ws as any).close(4401, 'invalid_token'); } catch {}
             return;
           }
-          logger.websocket('client_connected', clientId);
-          wsManager.addClient(ws as any, clientId);
+          logger.websocket('client_connected', clientId, { deviceId });
+          wsManager.addClient(ws as any, clientId, { deviceId });
           
           // Send welcome message
           const welcome: WebSocketMessage = {
@@ -378,6 +400,10 @@ function handleTerminalMessage(ws: WSWebSocket, clientId: string, message: { typ
       if (typeof id !== 'string' || !id) break;
       const session = terminalManager.get(id);
       termClientMap.set(id, clientId);
+      try {
+        const deviceId = wsManager.getClient(clientId)?.metadata?.['deviceId'] as string | undefined;
+        terminalRegistry.upsert({ id, active: !!session, ownerClientId: clientId, ownerDeviceId: deviceId, lastAttachedAt: Date.now() });
+      } catch {}
       try { sendBacklogToClient(clientId, id); } catch {}
       if (session) {
         const opened: WebSocketMessage = {
@@ -409,12 +435,16 @@ function handleTerminalMessage(ws: WSWebSocket, clientId: string, message: { typ
     }
 
     case 'term:open_or_attach': {
-      const { id, cwd, rows, cols } = payload || {};
+      const { id, cwd, rows, cols, title } = payload || {};
       if (typeof id !== 'string' || !id) break;
       const existing = terminalManager.get(id);
       if (existing) {
         termClientMap.set(id, clientId);
         try { sendBacklogToClient(clientId, id); } catch {}
+        try {
+          const deviceId = wsManager.getClient(clientId)?.metadata?.['deviceId'] as string | undefined;
+          terminalRegistry.upsert({ id, cwd: existing.cwd, cols: existing.cols, rows: existing.rows, title, active: true, ownerClientId: clientId, ownerDeviceId: deviceId, lastAttachedAt: Date.now() });
+        } catch {}
         const opened: WebSocketMessage = {
           v: 1,
           id: crypto.randomUUID(),
@@ -430,6 +460,10 @@ function handleTerminalMessage(ws: WSWebSocket, clientId: string, message: { typ
         const session = terminalManager.open(id, resolved, rows, cols);
         termClientMap.set(id, clientId);
         backlogMap.set(id, { chunks: [], totalBytes: 0 });
+        try {
+          const deviceId = wsManager.getClient(clientId)?.metadata?.['deviceId'] as string | undefined;
+          terminalRegistry.upsert({ id, cwd: resolved, cols: session.cols, rows: session.rows, title, active: true, ownerClientId: clientId, ownerDeviceId: deviceId, lastAttachedAt: Date.now() });
+        } catch {}
         const opened: WebSocketMessage = {
           v: 1,
           id: crypto.randomUUID(),
@@ -451,6 +485,10 @@ function handleTerminalMessage(ws: WSWebSocket, clientId: string, message: { typ
       const session = terminalManager.open(id, resolved, rows, cols);
       termClientMap.set(id, clientId);
       backlogMap.set(id, { chunks: [], totalBytes: 0 });
+      try {
+        const deviceId = wsManager.getClient(clientId)?.metadata?.['deviceId'] as string | undefined;
+        terminalRegistry.upsert({ id, cwd: resolved, cols: session.cols, rows: session.rows, active: true, ownerClientId: clientId, ownerDeviceId: deviceId, lastAttachedAt: Date.now() });
+      } catch {}
       
       // Send opened confirmation
       const opened: WebSocketMessage = {
@@ -482,6 +520,7 @@ function handleTerminalMessage(ws: WSWebSocket, clientId: string, message: { typ
       const { id, cols, rows, seq } = payload || {};
       if (typeof id === 'string' && Number.isFinite(cols) && Number.isFinite(rows)) {
         terminalManager.resize(id, Number(cols), Number(rows));
+        try { terminalRegistry.upsert({ id, cols: Number(cols), rows: Number(rows), active: true }); } catch {}
         
         // Send resize confirmation
         const resized: WebSocketMessage = {
@@ -498,11 +537,20 @@ function handleTerminalMessage(ws: WSWebSocket, clientId: string, message: { typ
       break;
     }
     
+    case 'term:title': {
+      const { id, title } = payload || {};
+      if (typeof id === 'string' && typeof title === 'string' && title.trim()) {
+        try { terminalRegistry.setTitle(id, String(title)); } catch {}
+      }
+      break;
+    }
+
     case 'term:close': {
       const { id } = payload || {};
       terminalManager.close(id);
       termClientMap.delete(id);
       backlogMap.delete(id);
+      try { terminalRegistry.remove(id); } catch {}
       break;
     }
     

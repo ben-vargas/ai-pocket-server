@@ -39,6 +39,19 @@ interface Snapshot {
   maxMode: boolean;
   phase?: string;
   pendingTools?: any[];
+  initiatorDeviceId?: string;
+  workPlan?: {
+    createdAt: string;
+    updatedAt: string;
+    items: Array<{
+      id: string;
+      title: string;
+      order: number;
+      estimated_seconds?: number;
+      status: 'pending' | 'complete';
+      completedAt?: string;
+    }>;
+  };
   conversation: { messages: any[] };
   streamingState?: any;
   lastSeq?: number;
@@ -85,6 +98,7 @@ class SessionStoreFs {
         maxMode: !!opts.maxMode,
         phase: 'created',
         pendingTools: [],
+        initiatorDeviceId: undefined,
         conversation: { messages: [] },
         streamingState: {
           currentMessage: null,
@@ -188,6 +202,137 @@ class SessionStoreFs {
         phase: snap.phase,
       });
     });
+  }
+
+  async setInitiator(sessionId: string, deviceId: string): Promise<void> {
+    if (!sessionId || !deviceId) return;
+    await this.enqueue(sessionId, async () => {
+      const snap = await this.readSnapshot(sessionId);
+      if (!snap) return;
+      if (!snap.initiatorDeviceId) {
+        snap.initiatorDeviceId = deviceId;
+        snap.lastActivity = new Date().toISOString();
+        await this.writeSnapshot(sessionId, snap);
+        await this.appendEvent(sessionId, { type: 'initiator_set', deviceId, ts: snap.lastActivity });
+        await this.upsertIndex({
+          id: snap.id,
+          title: snap.title,
+          createdAt: snap.createdAt,
+          lastActivity: snap.lastActivity,
+          messageCount: snap.messageCount,
+          workingDir: snap.workingDir,
+          maxMode: snap.maxMode,
+          phase: snap.phase,
+        });
+      }
+    });
+  }
+
+  async recordWorkPlanCreate(sessionId: string, items: Array<{ id: string; title: string; order: number; estimated_seconds?: number }>): Promise<void> {
+    await this.enqueue(sessionId, async () => {
+      const snap = await this.readSnapshot(sessionId);
+      if (!snap) return;
+      const now = new Date().toISOString();
+      snap.workPlan = {
+        createdAt: now,
+        updatedAt: now,
+        items: items.map((it) => ({ ...it, status: 'pending' as const })),
+      };
+      snap.lastActivity = now;
+      await this.writeSnapshot(sessionId, snap);
+      await this.appendEvent(sessionId, { type: 'work_plan_created', items: items.map(i => ({ id: i.id, title: i.title, order: i.order })), ts: now });
+      await this.upsertIndex({
+        id: snap.id,
+        title: snap.title,
+        createdAt: snap.createdAt,
+        lastActivity: snap.lastActivity,
+        messageCount: snap.messageCount,
+        workingDir: snap.workingDir,
+        maxMode: snap.maxMode,
+        phase: snap.phase,
+      });
+    });
+  }
+
+  async recordWorkPlanComplete(sessionId: string, id: string): Promise<
+    | { total: number; completed: number; completedItem: { id: string; title: string }; next?: { id: string; title: string } }
+    | null
+  > {
+    let result: { total: number; completed: number; completedItem: { id: string; title: string }; next?: { id: string; title: string } } | null = null;
+    await this.enqueue(sessionId, async () => {
+      const snap = await this.readSnapshot(sessionId);
+      if (!snap || !snap.workPlan) return;
+      const plan = snap.workPlan;
+      const found = plan.items.find((it) => it.id === id);
+      if (!found) return;
+      if (found.status !== 'complete') {
+        found.status = 'complete';
+        found.completedAt = new Date().toISOString();
+        plan.updatedAt = found.completedAt;
+      }
+      const total = plan.items.length;
+      const completed = plan.items.filter((it) => it.status === 'complete').length;
+      const nextPending = plan.items
+        .filter((it) => it.status !== 'complete')
+        .sort((a, b) => a.order - b.order)[0];
+      snap.lastActivity = new Date().toISOString();
+      await this.writeSnapshot(sessionId, snap);
+      await this.appendEvent(sessionId, { type: 'work_plan_completed', id, ts: snap.lastActivity });
+      await this.upsertIndex({
+        id: snap.id,
+        title: snap.title,
+        createdAt: snap.createdAt,
+        lastActivity: snap.lastActivity,
+        messageCount: snap.messageCount,
+        workingDir: snap.workingDir,
+        maxMode: snap.maxMode,
+        phase: snap.phase,
+      });
+      result = {
+        total,
+        completed,
+        completedItem: { id: found.id, title: found.title },
+        next: nextPending ? { id: nextPending.id, title: nextPending.title } : undefined,
+      };
+    });
+    return result;
+  }
+
+  async recordWorkPlanRevise(sessionId: string, items: Array<{ id: string; title?: string; order?: number; estimated_seconds?: number; remove?: boolean }>): Promise<{ total: number } | null> {
+    let totalOut: number | null = null;
+    await this.enqueue(sessionId, async () => {
+      const snap = await this.readSnapshot(sessionId);
+      if (!snap || !snap.workPlan) return;
+      const plan = snap.workPlan;
+      const map = new Map(plan.items.map((it) => [it.id, it] as const));
+      for (const upd of items) {
+        if (upd.remove) {
+          if (map.has(upd.id)) map.delete(upd.id);
+          continue;
+        }
+        const cur = map.get(upd.id);
+        if (cur) {
+          if (typeof upd.title === 'string') cur.title = upd.title;
+          if (typeof upd.order === 'number') cur.order = upd.order;
+          if (typeof upd.estimated_seconds === 'number') cur.estimated_seconds = upd.estimated_seconds;
+        } else {
+          map.set(upd.id, {
+            id: upd.id,
+            title: upd.title || upd.id,
+            order: typeof upd.order === 'number' ? upd.order : map.size + 1,
+            estimated_seconds: upd.estimated_seconds,
+            status: 'pending',
+          });
+        }
+      }
+      plan.items = Array.from(map.values()).sort((a, b) => a.order - b.order);
+      plan.updatedAt = new Date().toISOString();
+      snap.lastActivity = plan.updatedAt;
+      await this.writeSnapshot(sessionId, snap);
+      await this.appendEvent(sessionId, { type: 'work_plan_revised', items, ts: snap.lastActivity });
+      totalOut = plan.items.length;
+    });
+    return totalOut === null ? null : { total: totalOut };
   }
 
   async recordAssistantFinalMessage(sessionId: string, finalMessage: any): Promise<void> {
@@ -357,5 +502,4 @@ class SessionStoreFs {
 }
 
 export const sessionStoreFs = new SessionStoreFs();
-
 

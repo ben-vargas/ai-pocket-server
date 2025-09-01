@@ -192,7 +192,8 @@ export async function processStream(
                 
                 // For Max (chatMode === false) auto-approval: queue tool requests to execute AFTER this stream completes,
                 // so we can send them back to the API in the required "user tool_result" message format.
-                if (!chatMode && isToolSafe(toolRequest)) {
+                // Auto-approve safe tools in Max mode, and always auto-approve work_plan
+                if ((!chatMode && isToolSafe(toolRequest)) || toolRequest.name === 'work_plan') {
                   state.autoToolRequests?.push(toolRequest);
                 } else {
                   // Chat mode: send to client for manual approval
@@ -335,6 +336,8 @@ function isToolSafe(request: ToolRequest): boolean {
       return !isEditorCommandDangerous(request.input);
     case 'web_search':
       return true; // Web search is always safe
+    case 'work_plan':
+      return true; // Server-local plan state; safe
     default:
       return false;
   }
@@ -365,6 +368,16 @@ function generateToolDescription(toolName: string, input: any): string {
     }
   } else if (toolName === 'web_search' && input?.query) {
     return `Search: ${input.query}`;
+  } else if (toolName === 'work_plan') {
+    if (input?.command === 'create' && Array.isArray(input?.items)) {
+      return `Create work plan: ${input.items.length} steps`;
+    }
+    if (input?.command === 'complete') {
+      return `Complete step ${input.id}`;
+    }
+    if (input?.command === 'revise') {
+      return `Revise work plan (${(input.items || []).length} changes)`;
+    }
   }
   
   return 'Execute tool';

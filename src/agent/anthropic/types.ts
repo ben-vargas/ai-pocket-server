@@ -229,6 +229,43 @@ export interface TextEditorTool extends SpecialTool {
   name: 'str_replace_based_edit_tool';
 }
 
+// Work Plan Tool
+export interface WorkPlanTool extends SpecialTool {
+  type: 'work_plan_20250828';
+  name: 'work_plan';
+}
+
+export type WorkPlanCommand =
+  | WorkPlanCreateCommand
+  | WorkPlanCompleteCommand
+  | WorkPlanReviseCommand;
+
+export interface WorkPlanCreateCommand {
+  command: 'create';
+  items: Array<{
+    id: string;
+    title: string;
+    order: number;
+    estimated_seconds?: number;
+  }>;
+}
+
+export interface WorkPlanCompleteCommand {
+  command: 'complete';
+  id: string;
+}
+
+export interface WorkPlanReviseCommand {
+  command: 'revise';
+  items: Array<{
+    id: string;
+    title?: string;
+    order?: number;
+    estimated_seconds?: number;
+    remove?: boolean;
+  }>;
+}
+
 export type TextEditorCommand = 
   | ViewCommand
   | StrReplaceCommand

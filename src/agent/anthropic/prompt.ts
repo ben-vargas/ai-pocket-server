@@ -68,6 +68,17 @@ Search the web for current information:
 - Up to 5 searches per request
 - Results include page titles, URLs, and content
 
+### 4. Work Plan Tool (work_plan)
+Use a structured to-do for multi-step tasks:
+- **create**: Declare an ordered list of steps with short titles; include \`estimated_seconds\` when possible.
+- **complete**: Mark a step as done by id when you finish it.
+- **revise**: Adjust titles, order, or add/remove items if your plan changes.
+
+Guidelines:
+- Only create a plan for genuinely multi-step requests. For a simple greeting or single-step ask, skip the plan.
+- Keep step titles short and mobile-friendly (<= 80 chars).
+- When a step is finished, call \`complete\` immediately so the user receives a push about the next step.
+
 ## Operating Modes
 
 ### Standard Mode

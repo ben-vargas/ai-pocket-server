@@ -5,7 +5,9 @@
 
 import { verifyAuthFromRequest } from '../auth/middleware';
 import type { Router } from '../server/router';
+import { wsManager } from '../server/websocket';
 import { handleAgentWebSocket, registerAgentRoutes } from './anthropic/index';
+import { setInitiatorDeviceId } from './session-initiators';
 import { sessionStoreFs } from './store/session-store-fs';
 
 /**
@@ -41,6 +43,18 @@ export async function handleAgentMessage(
 ): Promise<void> {
   // Route based on message type prefix
   if (message.type?.startsWith('agent:')) {
+    // Capture initiator device for this session (for targeted pushes)
+    try {
+      if (message.type === 'agent:message' && typeof message.sessionId === 'string') {
+        const client = wsManager.getClient(clientId);
+        const deviceId = (client?.metadata as any)?.deviceId as string | undefined;
+        if (deviceId) {
+          setInitiatorDeviceId(message.sessionId, deviceId);
+          // Persist if snapshot already exists
+          void sessionStoreFs.setInitiator(message.sessionId, deviceId);
+        }
+      }
+    } catch {}
     // Default to Anthropic for now
     await handleAgentWebSocket(ws, clientId, message);
   }

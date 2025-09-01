@@ -75,6 +75,38 @@ Flags
   --pin <code>          Override generated PIN (pair only)
 ```
 
+Terminal commands (resume sessions on desktop)
+----------------------------------------------
+
+Pocket Server can attach your mobile terminal sessions on your desktop terminal. No pairing or token is required on your own machine — the CLI and server exchange a local secret under `~/.pocket-server/data/runtime/local-ws.key`.
+
+```
+# List active terminal sessions with indices
+pocket-server terminal sessions
+
+# Attach by index (from the list)
+pocket-server terminal attach 2
+
+# Attach by title (case-insensitive, supports spaces)
+pocket-server terminal attach --name "Opencode"
+# or positional query
+pocket-server terminal attach "Opencode"
+
+# Attach by id
+pocket-server terminal attach --id term:/path#3
+
+# JSON output for tooling
+pocket-server terminal sessions --json
+
+# Optional: specify a port if not 3000
+pocket-server terminal attach 1 --port 3010
+```
+
+Notes
+- Attach streams the session interactively into your current terminal. Press Ctrl+C to detach without closing the remote PTY.
+- The desktop attach replays terminal output to reconstruct the TUI exactly as you left it on mobile. It does not clear your local terminal.
+- Session titles come from the mobile tabs; you can long‑press to rename on mobile and they’ll appear here.
+
 How Pocket works (high level)
 -----------------------------
 

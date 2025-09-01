@@ -39,4 +39,16 @@ export interface CursorConversationResponse {
   messages: CursorConversationMessage[];
 }
 
+// Local persistent record for webhook-driven updates and listing
+export interface CloudAgentRecord {
+  id: string;
+  name: string;
+  status: CloudAgentStatus;
+  source: { repository: string; ref?: string };
+  target?: { branchName?: string; url?: string; prUrl?: string; autoCreatePr?: boolean };
+  summary?: string;
+  createdAt: string;
+  updatedAt: string;
+  ownerClientId?: string;
+}
 

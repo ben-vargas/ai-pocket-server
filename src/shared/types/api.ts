@@ -95,9 +95,28 @@ export interface TermOpenOrAttachPayload {
   cwd?: string;
   rows?: number;
   cols?: number;
+  title?: string; // optional human-friendly name from mobile
 }
 
 export interface TermAttachPayload { id: string }
+
+// Terminal listing (HTTP /terminal/sessions)
+export interface TerminalListItem {
+  id: string;
+  title?: string;
+  cwd: string;
+  createdAt: number;
+  cols?: number;
+  rows?: number;
+  active: boolean;
+  ownerClientId?: string;
+  ownerDeviceId?: string;
+  lastAttachedAt?: number;
+}
+
+export interface TerminalListResponse {
+  sessions: TerminalListItem[];
+}
 
 // Notifications API types
 export interface PushDevice {

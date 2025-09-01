@@ -153,6 +153,7 @@ ${colors.bright}COMMANDS:${colors.reset}
   ${colors.brightGreen}pair${colors.reset}       Start server and open pairing window  
   ${colors.brightGreen}stop${colors.reset}       Stop a running server
   ${colors.brightGreen}update${colors.reset}     Update to latest release via installer
+  ${colors.brightGreen}terminal${colors.reset}   Terminal utilities (${colors.dim}sessions, attach, select${colors.reset})
   ${colors.brightGreen}help${colors.reset}       Show this help
 
 ${colors.bright}FLAGS:${colors.reset}
@@ -167,6 +168,10 @@ ${colors.bright}EXAMPLES:${colors.reset}
   ${colors.gray}$${colors.reset} ${colors.brightGreen}pocket-server start${colors.reset} ${colors.brightYellow}--port${colors.reset} ${colors.gray}3010${colors.reset}
   ${colors.gray}$${colors.reset} ${colors.brightGreen}pocket-server start${colors.reset} ${colors.brightYellow}-p=3010${colors.reset} ${colors.brightYellow}--remote${colors.reset}
   ${colors.gray}$${colors.reset} ${colors.brightGreen}pocket-server pair${colors.reset} ${colors.brightYellow}--duration${colors.reset} ${colors.gray}120000${colors.reset}
+  ${colors.gray}$${colors.reset} ${colors.brightGreen}pocket-server terminal sessions${colors.reset}
+  ${colors.gray}$${colors.reset} ${colors.brightGreen}pocket-server terminal attach${colors.reset} ${colors.gray}--index 2${colors.reset}
+  ${colors.gray}$${colors.reset} ${colors.brightGreen}pocket-server terminal attach${colors.reset} ${colors.gray}"Opencode"${colors.reset}
+  ${colors.gray}$${colors.reset} ${colors.brightGreen}pocket-server terminal attach${colors.reset} ${colors.gray}--name "Opencode"${colors.reset}
 `;
 }
 
