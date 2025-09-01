@@ -9,7 +9,7 @@
     "run": "tsx src/cli.ts",
     "test": "tsx --test src/**/*.test.ts",
     "rebuild:native": "npm rebuild node-pty",
-    "lint": "biome check --reporter=summary --max-diagnostics=0 ."
+    "lint": "npx -y @biomejs/biome@2.2.0 check --reporter=summary --max-diagnostics=0 ."
   },
   "engines": {
     "node": ">=22.18.0"
