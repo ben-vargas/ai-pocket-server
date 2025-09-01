@@ -9,7 +9,7 @@
     "run": "tsx src/cli.ts",
     "test": "tsx --test src/**/*.test.ts",
     "rebuild:native": "npm rebuild node-pty",
-    "lint": "npx -y @biomejs/biome@2.2.0 check --reporter=summary --max-diagnostics=0 ."
+    "lint": "npx -p @biomejs/biome@2.2.0 biome check --reporter=summary --max-diagnostics=0 ."
   },
   "engines": {
     "node": ">=22.18.0"
@@ -31,7 +31,6 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.2.0",
     "@types/cors": "^2.8.17",
     "@types/node": "^20.11.17",
     "@types/ws": "^8.5.13",
