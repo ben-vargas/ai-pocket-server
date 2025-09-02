@@ -229,11 +229,10 @@ export interface TextEditorTool extends SpecialTool {
   name: 'str_replace_based_edit_tool';
 }
 
-// Work Plan Tool
-export interface WorkPlanTool extends SpecialTool {
-  type: 'work_plan_20250828';
-  name: 'work_plan';
-}
+// Work Plan Tool (custom JSON-schema tool)
+// Implemented client-side (our server), not an Anthropic server tool.
+// Use the generic Tool shape with name/description/input_schema.
+export type WorkPlanTool = Tool;
 
 export type WorkPlanCommand =
   | WorkPlanCreateCommand
@@ -427,6 +426,11 @@ export interface AgentSession {
   currentStreamController?: AbortController;
   phase?: AgentPhase;
   pendingTools?: ToolRequest[];
+  projectContext?: {
+    source: 'CLAUDE.md' | 'AGENTS.md';
+    path: string;
+    content: string;
+  };
 }
 
 export interface StreamingState {

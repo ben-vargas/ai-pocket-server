@@ -8,6 +8,7 @@ export interface SystemPromptParams {
   workingDirectory: string;
   platform?: string;
   osVersion?: string;
+  projectContext?: { sourcePath: string; content: string };
 }
 
 /**
@@ -17,7 +18,8 @@ export function generateSystemPrompt(params: SystemPromptParams): string {
   const {
     workingDirectory,
     platform = process.platform,
-    osVersion = os.release()
+    osVersion = os.release(),
+    projectContext
   } = params;
 
   const currentDate = new Date().toLocaleDateString('en-US', {
@@ -35,6 +37,10 @@ export function generateSystemPrompt(params: SystemPromptParams): string {
   const platformName = platform === 'darwin' ? 'macOS' : 
                        platform === 'linux' ? 'Linux' : 
                        platform === 'win32' ? 'Windows' : platform;
+
+  const projectSection = projectContext
+    ? `\n\n## Project Memory (source: ${projectContext.sourcePath})\n\n${projectContext.content}\n`
+    : '';
 
   return `You are Pocket, an AI coding assistant that runs on ${platformName} and is controlled through a mobile app. You provide intelligent coding assistance with file editing and terminal access capabilities.
 
@@ -79,6 +85,10 @@ Guidelines:
 - Keep step titles short and mobile-friendly (<= 80 chars).
 - When a step is finished, call \`complete\` immediately so the user receives a push about the next step.
 
+Tool usage requirements:
+- When you need to perform multiple independent operations, prefer using tools in parallel when appropriate.
+- For work_plan, ensure the input strictly matches the JSON schema: \`command\` is required; provide \`items\` for create/revise, or \`id\` for complete.
+
 ## Operating Modes
 
 ### Standard Mode
@@ -114,5 +124,5 @@ When enabled by the user:
    - Include appropriate comments when helpful
    - Consider error handling and edge cases
 
-Remember: You're helping users code effectively from their mobile devices, making development accessible anywhere.`;
+Remember: You're helping users code effectively from their mobile devices, making development accessible anywhere.${projectSection}`;
 }

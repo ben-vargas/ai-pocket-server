@@ -4,6 +4,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { loadProjectContext } from '../context/loader';
 import { generateSystemPrompt } from './prompt';
 import { processStream } from './streaming';
 import { generateTitle } from './title';
@@ -11,15 +12,15 @@ import { bashToolDefinition, executeBash } from './tools/bash';
 import { editorToolDefinition, executeEditor } from './tools/editor';
 import { executeWebSearch, webSearchToolDefinition } from './tools/web-search';
 import { executeWorkPlan, workPlanToolDefinition } from './tools/work-plan';
-import type { 
-  AgentSession, 
-  ClientMessage, 
+import type {
+  AgentSession,
+  ClientMessage,
   Conversation,
-  CreateMessageRequest, 
+  CreateMessageRequest,
   MessageParam,
   ServerMessage,
   ToolRequest,
-  ToolResultBlock
+  ToolResultBlock,
 } from './types';
 
 export class AnthropicService {
@@ -134,8 +135,23 @@ export class AnthropicService {
     session.phase = 'ready';
     onMessage({ type: 'agent:status', sessionId, phase: 'ready' } as any);
 
+    // Resolve project context once on first user message
+    if (session.conversation.messages.length === 1 && !session.projectContext) {
+      try {
+        const ctx = await loadProjectContext(workingDir);
+        if (ctx) {
+          session.projectContext = { source: ctx.source, path: ctx.path, content: ctx.content };
+        }
+      } catch {}
+    }
+
     // Create system prompt
-    const systemPrompt = generateSystemPrompt({ workingDirectory: workingDir });
+    const systemPrompt = generateSystemPrompt({
+      workingDirectory: workingDir,
+      projectContext: session.projectContext
+        ? { sourcePath: session.projectContext.path, content: session.projectContext.content }
+        : undefined,
+    });
 
     // Prepare tools
     const tools = [bashToolDefinition, editorToolDefinition, webSearchToolDefinition, workPlanToolDefinition];
@@ -492,7 +508,12 @@ export class AnthropicService {
     apiKey: string,
     onMessage: (msg: ServerMessage) => void
   ): Promise<void> {
-    const systemPrompt = generateSystemPrompt({ workingDirectory: session.workingDir });
+    const systemPrompt = generateSystemPrompt({
+      workingDirectory: session.workingDir,
+      projectContext: session.projectContext
+        ? { sourcePath: session.projectContext.path, content: session.projectContext.content }
+        : undefined,
+    });
     const tools = [bashToolDefinition, editorToolDefinition, webSearchToolDefinition, workPlanToolDefinition];
 
     try {

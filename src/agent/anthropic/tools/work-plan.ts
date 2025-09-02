@@ -11,8 +11,32 @@ import { sessionStoreFs } from '../../store/session-store-fs';
 import type { WorkPlanCommand, WorkPlanTool } from '../types';
 
 export const workPlanToolDefinition: WorkPlanTool = {
-  type: 'work_plan_20250828',
   name: 'work_plan',
+  description:
+    'Create and manage a multi-step work plan for the current session. Use "create" to declare an ordered list of steps (id, title, order, optional estimated_seconds), "complete" to mark a step done by id, and "revise" to add/remove/reorder/update steps. Keep titles short and mobile-friendly.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      command: { type: 'string', enum: ['create', 'complete', 'revise'] },
+      items: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            title: { type: 'string' },
+            order: { type: 'integer', minimum: 1 },
+            estimated_seconds: { type: 'integer', minimum: 1 },
+            remove: { type: 'boolean' }
+          },
+          additionalProperties: false
+        }
+      },
+      id: { type: 'string' }
+    },
+    required: ['command'],
+    additionalProperties: false
+  }
 };
 
 /**
@@ -51,9 +75,12 @@ export async function executeWorkPlan(
     }
 
     case 'complete': {
-      const res = await sessionStoreFs.recordWorkPlanComplete(sessionId, input.id);
+      if (typeof (input as any).id !== 'string' || !(input as any).id.trim()) {
+        return 'No id provided for complete command';
+      }
+      const res = await sessionStoreFs.recordWorkPlanComplete(sessionId, (input as any).id);
       if (!res) {
-        return `No matching step found for id ${input.id}`;
+        return `No matching step found for id ${(input as any).id}`;
       }
       const snap = await sessionStoreFs.getSnapshot(sessionId);
       const title = snap?.title || 'Agent';
@@ -76,7 +103,10 @@ export async function executeWorkPlan(
     }
 
     case 'revise': {
-      const res = await sessionStoreFs.recordWorkPlanRevise(sessionId, input.items || []);
+      if (!Array.isArray((input as any).items) || (input as any).items.length === 0) {
+        return 'No revisions provided';
+      }
+      const res = await sessionStoreFs.recordWorkPlanRevise(sessionId, (input as any).items || []);
       const count = res?.total ?? 0;
       return `Revised work plan. Now ${count} steps.`;
     }
