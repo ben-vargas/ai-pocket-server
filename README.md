@@ -1,20 +1,32 @@
-Pocket Server (open source)
-===========================
+Pocket Server
+=============
 
-Pocket Server is the server component of Pocket Agent — a Claude Code‑style local/remote coding agent you control from your phone. The server runs on your machine and exposes HTTP + WebSocket APIs; the mobile app pairs with it to stream terminal, edit files, search the web, and run tools.
+An OS for your agents, built for your pocket.
 
-- **Local coding agent** you can approve or auto‑run, with bash, editor, and web‑search tools
-- **Best‑in‑class mobile terminal**: fast, touch‑optimized, multi‑tab sessions with smooth streaming
-- **File explorer & editor**: browse, view, edit, and diff files from the phone
-- **Quick search** across your repo and telescopic fuzzy search
-- **Cloud background agents**: launch autonomous coding jobs on VMs from GitHub repos; monitor, review diffs, and approve PRs
-- **Notifications**: opt‑in device notifications for task updates
-- **Secure pairing + tokens**: device PIN pairing (local‑only), short‑lived access tokens for HTTP/WS
-- **Remote access** via optional Cloudflare tunnel (`pocket-server start --remote`)
-- **Multi‑platform releases**: macOS (arm64, x64) and Linux (x64) — with bundled Node v22.18.0
+Pocket Server is the local runtime of Pocket — the mobile operating system for AI agents. It runs on your machine and exposes HTTP + WebSocket APIs so your phone can host, control, and collaborate with agents against your codebase in real time.
 
-What you get
-------------
+Your coding agents, file system, and terminal — all in your pocket.
+
+Core OS capabilities
+--------------------
+
+- Agent runtime and tools: approve or auto‑run coding agents with bash, editor, and web‑search tools
+- Native mobile terminal: fast, touch‑optimized, multi‑tab sessions with smooth streaming
+- File system + editor: browse, view, edit, and diff files from your phone
+- Repo search: quick search and telescopic fuzzy search across code
+- Background/cloud agents: launch autonomous coding jobs on VMs from GitHub repos; monitor, review diffs, and approve PRs
+- Notifications: opt‑in device notifications for task updates
+- Security model: local‑only PIN pairing; short‑lived tokens for HTTP/WS
+- Remote access: optional Cloudflare tunnel (`pocket-server start --remote`)
+- Versioned releases: macOS (arm64, x64) and Linux (x64), with bundled Node v22.18.0
+
+Mission
+-------
+
+Make agents native to your phone — fast, local‑first, and secure. Pocket provides OS‑like primitives for agents (sessions, processes, filesystem, networking, notifications) with a server‑authoritative model and an event‑driven UI.
+
+Architecture at a glance
+------------------------
 
 - Server‑authoritative conversations and sessions (no state in the app)
 - Event‑driven protocol over WebSocket (`/ws`) and REST endpoints (Hono)
@@ -107,8 +119,8 @@ Notes
 - The desktop attach replays terminal output to reconstruct the TUI exactly as you left it on mobile. It does not clear your local terminal.
 - Session titles come from the mobile tabs; you can long‑press to rename on mobile and they’ll appear here.
 
-How Pocket works (high level)
------------------------------
+How the OS works
+----------------
 
 - Pairing (local‑only): your phone pairs over LAN to obtain a device secret
 - Auth tokens: short‑lived access tokens are derived from the device secret; HTTP uses `Authorization: Pocket <token>`, WS connects with `?token=...` (invalid tokens close with 4401)
