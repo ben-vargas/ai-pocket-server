@@ -73,7 +73,6 @@ Use it with the Pocket mobile app
 4. Start the server (`pocket-server start`), then connect from the app
 5. For remote access, run `pocket-server start --remote` and paste the public URL in the app
 
-![Pairing on mobile](readme-images/mobile-pairing.webp)
 
 Mobile working directory selection
 ----------------------------------
@@ -85,7 +84,6 @@ Mobile working directory selection
   - Tap the header to open a compact working directory picker. Choose a folder to switch immediately.
 - The server uses the selected directory for agent tools and terminal sessions.
 
-![Select working directory](readme-images/file-browser.webp)
 
 AI providers
 ------------
@@ -96,7 +94,6 @@ AI providers
   - `ANTHROPIC_API_KEY` for Anthropic
 - The server emits a unified `agent:*` event stream to clients regardless of provider.
 
-![Bring your own key](readme-images/byok.webp)
 
 CLI reference
 -------------
@@ -152,7 +149,6 @@ pocket-server terminal select --index 2
 pocket-server terminal select --pick    # interactive picker
 ```
 
-![Tool approvals](readme-images/tool-approvals.webp)
 
 Notes
 - Attach streams the session interactively into your current terminal. Press Ctrl+C to detach without closing the remote PTY.
