@@ -141,6 +141,9 @@ function getBacklogJoined(id: string): string | null {
   if (!entry || entry.chunks.length === 0) return null;
   return entry.chunks.join('');
 }
+// Dedupe: last seen input seq per terminal id
+const lastInputSeqByTerm = new Map<string, number>();
+
 
 function sendBacklogToClient(clientId: string, id: string) {
   const joined = getBacklogJoined(id);
@@ -400,6 +403,7 @@ function handleTerminalMessage(ws: WSWebSocket, clientId: string, message: { typ
       if (typeof id !== 'string' || !id) break;
       const session = terminalManager.get(id);
       termClientMap.set(id, clientId);
+      try { lastInputSeqByTerm.delete(id); } catch {}
       try {
         const deviceId = wsManager.getClient(clientId)?.metadata?.['deviceId'] as string | undefined;
         terminalRegistry.upsert({ id, active: !!session, ownerClientId: clientId, ownerDeviceId: deviceId, lastAttachedAt: Date.now() });
@@ -441,6 +445,7 @@ function handleTerminalMessage(ws: WSWebSocket, clientId: string, message: { typ
       if (existing) {
         termClientMap.set(id, clientId);
         try { sendBacklogToClient(clientId, id); } catch {}
+        try { lastInputSeqByTerm.delete(id); } catch {}
         try {
           const deviceId = wsManager.getClient(clientId)?.metadata?.['deviceId'] as string | undefined;
           terminalRegistry.upsert({ id, cwd: existing.cwd, cols: existing.cols, rows: existing.rows, title, active: true, ownerClientId: clientId, ownerDeviceId: deviceId, lastAttachedAt: Date.now() });
@@ -460,6 +465,7 @@ function handleTerminalMessage(ws: WSWebSocket, clientId: string, message: { typ
         const session = terminalManager.open(id, resolved, rows, cols);
         termClientMap.set(id, clientId);
         backlogMap.set(id, { chunks: [], totalBytes: 0 });
+        try { lastInputSeqByTerm.delete(id); } catch {}
         try {
           const deviceId = wsManager.getClient(clientId)?.metadata?.['deviceId'] as string | undefined;
           terminalRegistry.upsert({ id, cwd: resolved, cols: session.cols, rows: session.rows, title, active: true, ownerClientId: clientId, ownerDeviceId: deviceId, lastAttachedAt: Date.now() });
@@ -485,6 +491,7 @@ function handleTerminalMessage(ws: WSWebSocket, clientId: string, message: { typ
       const session = terminalManager.open(id, resolved, rows, cols);
       termClientMap.set(id, clientId);
       backlogMap.set(id, { chunks: [], totalBytes: 0 });
+      try { lastInputSeqByTerm.delete(id); } catch {}
       try {
         const deviceId = wsManager.getClient(clientId)?.metadata?.['deviceId'] as string | undefined;
         terminalRegistry.upsert({ id, cwd: resolved, cols: session.cols, rows: session.rows, active: true, ownerClientId: clientId, ownerDeviceId: deviceId, lastAttachedAt: Date.now() });
@@ -505,7 +512,22 @@ function handleTerminalMessage(ws: WSWebSocket, clientId: string, message: { typ
     }
     
     case 'term:input': {
-      const { id, data } = payload || {};
+      const { id, data, seq } = payload || {};
+      try {
+        const s = typeof data === 'string' ? data : '';
+        if (s && s.length === 1 && (s === '\t' || s === 'c' || s === 'd' || s === ' ')) {
+          logger.websocket('trace_term_input', clientId, { id, code: s.charCodeAt(0), ch: s, seq });
+        }
+      } catch {}
+      // Dedupe by seq (when provided)
+      if (typeof id === 'string' && Number.isFinite(seq)) {
+        const last = lastInputSeqByTerm.get(id) ?? -1;
+        if (Number(seq) <= last) {
+          logger.websocket('term_input_dropped_seq', clientId, { id, seq, last });
+          break;
+        }
+        lastInputSeqByTerm.set(id, Number(seq));
+      }
       terminalManager.write(id, data);
       // Flush any buffered output immediately to keep echo snappy while typing
       try {

@@ -57,15 +57,46 @@ pocket-server start --remote
 
 > Remote access notes
 > - macOS and Linux: `--remote` works out‑of‑the‑box. The CLI auto‑downloads `cloudflared` on first run (no account/config needed) and prints a public HTTPS URL.
+>
+> Auto‑update notes
+> - On `start`, the CLI checks for a newer release and will auto‑install it if found (preserving your flags). Skip with `--no-auto-update`.
 ```
 
 Use it with the Pocket mobile app
 ---------------------------------
 
 1. Install Pocket Server (above)
-2. Open the app → Pair this device → Enter the 6‑digit PIN from `pocket-server pair`
-3. Start the server (`pocket-server start`), then connect from the app
-4. For remote access, run `pocket-server start --remote` and paste the public URL in the app
+2. Download the mobile app and open it:
+   - iOS (TestFlight): https://testflight.apple.com/join/ZHNpHgwd
+   - Website: https://www.pocket-agent.xyz
+3. Pair this device → Enter the 6‑digit PIN from `pocket-server pair`
+4. Start the server (`pocket-server start`), then connect from the app
+5. For remote access, run `pocket-server start --remote` and paste the public URL in the app
+
+![Pairing on mobile](readme-images/mobile-pairing.webp)
+
+Mobile working directory selection
+----------------------------------
+
+- From the Servers screen
+  - Connect to your server. If no working directory is set, the app opens a full‑screen file browser.
+  - Select your project folder. You land in Chat by default; if you launched Terminal, you land in Terminal.
+- From within Chat or Terminal
+  - Tap the header to open a compact working directory picker. Choose a folder to switch immediately.
+- The server uses the selected directory for agent tools and terminal sessions.
+
+![Select working directory](readme-images/file-browser.webp)
+
+AI providers
+------------
+
+- OpenAI (GPT‑5) and Anthropic (Claude) are supported. By default, agent traffic uses OpenAI unless a client explicitly selects `provider: "anthropic"`.
+- Provide API keys via environment variables or per‑message from the client:
+  - `OPENAI_API_KEY` for OpenAI (Responses API; function calling, parallel tools)
+  - `ANTHROPIC_API_KEY` for Anthropic
+- The server emits a unified `agent:*` event stream to clients regardless of provider.
+
+![Bring your own key](readme-images/byok.webp)
 
 CLI reference
 -------------
@@ -78,11 +109,13 @@ Commands
   pair         Start the server and open pairing window
   stop         Stop a running server
   update       Update to the latest release via installer
+  terminal     Terminal utilities (sessions, attach, select)
   help         Show help
 
 Flags
   --port, -p <n>        Port to listen on (default: 3000 or $PORT)
   --remote, -r          Start Cloudflare tunnel for remote access
+  --no-auto-update      Skip pre-start update check
   --duration <ms>       Pairing window duration (pair only; default: 60000)
   --pin <code>          Override generated PIN (pair only)
 ```
@@ -112,12 +145,20 @@ pocket-server terminal sessions --json
 
 # Optional: specify a port if not 3000
 pocket-server terminal attach 1 --port 3010
+
+# Select (helpers & interactive)
+pocket-server terminal select --name "Opencode"
+pocket-server terminal select --index 2
+pocket-server terminal select --pick    # interactive picker
 ```
+
+![Tool approvals](readme-images/tool-approvals.webp)
 
 Notes
 - Attach streams the session interactively into your current terminal. Press Ctrl+C to detach without closing the remote PTY.
 - The desktop attach replays terminal output to reconstruct the TUI exactly as you left it on mobile. It does not clear your local terminal.
 - Session titles come from the mobile tabs; you can long‑press to rename on mobile and they’ll appear here.
+- Voice dictation on mobile: the Terminal screen supports speech‑to‑text and streams text as normal input to the PTY.
 
 How the OS works
 ----------------
@@ -163,18 +204,32 @@ Environment
 
 - `PORT` (default `3000`)
 - `ANTHROPIC_API_KEY` (optional; enables Anthropic‑powered agents)
+- `OPENAI_API_KEY` (optional; enables OpenAI‑powered agents)
+- `POCKET_INSTALL_URL` (optional; override installer URL used by pre‑start auto‑update)
 - Cloudflare tunnel (optional): `CF_TUNNEL_TOKEN`, `CF_TUNNEL_CONFIG`, `CF_TUNNEL_LOGLEVEL`
 
 Key endpoints (reference)
 -------------------------
 
 - `GET /health` – basic health
+- `GET /stats` – server stats (auth required)
 - `GET /ws` – WebSocket endpoint
 - `/auth/*` – pairing, token
 - `/agent/*` – session lifecycle
 - `/fs/*` – file system operations
 - `/notifications/*` – device notifications
 - `/cloud/*` – background agents (Cursor)
+
+Project context (CLAUDE.md / AGENTS.md)
+---------------------------------------
+
+- The server injects lightweight project context into agent prompts by searching upward from the working directory for the nearest `CLAUDE.md` or `AGENTS.md`.
+- Preference:
+  - Anthropic sessions prefer `CLAUDE.md` (with support for in‑file `@imports` up to a safe depth, ignoring code blocks/spans).
+  - OpenAI sessions prefer `AGENTS.md`.
+- Size limit: context is normalized and capped at ~100KB to keep prompts responsive.
+- Monorepos: nested `AGENTS.md`/`CLAUDE.md` files are supported; the closest file wins.
+- See `docs/context-injection-patterns/agents-specification.md` for the AGENTS.md format and guidance.
 
 Security notes
 --------------

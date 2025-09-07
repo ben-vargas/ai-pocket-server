@@ -4,8 +4,8 @@
  */
 
 import type { Router } from '../../server/router';
-import { wsManager } from '../../server/websocket';
-import type { WebSocketMessage } from '../../shared/types/api';
+import { Orchestrator } from '../core/orchestrator';
+import { AnthropicAdapter } from '../providers/anthropic/adapter';
 import { sessionStoreFs } from '../store/session-store-fs';
 import { anthropicService } from './anthropic';
 import type { ClientMessage, ServerMessage } from './types';
@@ -81,32 +81,8 @@ export async function handleAgentWebSocket(
   };
 
   try {
-    switch (clientMessage.type) {
-      case 'agent:message':
-        await anthropicService.processMessage(clientMessage, apiKey, (m) => { void sendMessage(m); });
-        break;
-        
-      case 'agent:tool_response':
-        await anthropicService.processToolResponse(clientMessage, apiKey, sendMessage);
-        break;
-        
-      case 'agent:stop':
-        anthropicService.stopStream(clientMessage.sessionId);
-        sendMessage({
-          type: 'agent:assistant',
-          sessionId: clientMessage.sessionId,
-          content: 'Stream stopped',
-          isComplete: true
-        });
-        break;
-        
-      default:
-        sendMessage({
-          type: 'agent:error',
-          sessionId: clientMessage.sessionId,
-          error: `Unknown message type: ${(clientMessage as any).type}`
-        });
-    }
+    const orch = new Orchestrator(new AnthropicAdapter(), apiKey);
+    await orch.handle(clientMessage, (m) => { void sendMessage(m as any); });
   } catch (error: any) {
     console.error('[Agent] Error handling WebSocket message:', error);
     sendMessage({

@@ -1,7 +1,7 @@
 import os from 'node:os';
 import { promises as fs } from 'fs';
 import { dirname, join, resolve, sep } from 'path';
-import { ENABLE_CONTEXT_INJECTION, MAX_CONTEXT_BYTES, MAX_IMPORT_DEPTH } from './config';
+import { MAX_CONTEXT_BYTES, MAX_IMPORT_DEPTH } from './config';
 
 export type ProjectContextSource = 'CLAUDE.md' | 'AGENTS.md';
 
@@ -17,12 +17,15 @@ export interface ProjectContext {
  * Load project context by searching upward from workingDir for CLAUDE.md (preferred) or AGENTS.md.
  * For CLAUDE.md, resolve @imports recursively up to MAX_IMPORT_DEPTH, skipping code blocks/spans.
  */
-export async function loadProjectContext(workingDir: string): Promise<ProjectContext | null> {
-  if (!ENABLE_CONTEXT_INJECTION) return null;
+export async function loadProjectContext(
+  workingDir: string,
+  options?: { preferred?: 'claude' | 'agents' }
+): Promise<ProjectContext | null> {
   const foundClaude = await findNearestFileUp(workingDir, 'CLAUDE.md');
   const foundAgents = await findNearestFileUp(workingDir, 'AGENTS.md');
 
-  const chosen = foundClaude || foundAgents;
+  const preferAgents = (options?.preferred === 'agents');
+  const chosen = preferAgents ? (foundAgents || foundClaude) : (foundClaude || foundAgents);
   if (!chosen) return null;
 
   const source: ProjectContextSource = chosen.endsWith(`${sep}CLAUDE.md`) ? 'CLAUDE.md' : 'AGENTS.md';
@@ -191,5 +194,3 @@ async function resolveImportPath(pathToken: string, baseDir: string): Promise<st
     return null;
   }
 }
-
-

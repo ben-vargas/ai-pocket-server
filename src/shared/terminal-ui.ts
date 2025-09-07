@@ -159,6 +159,7 @@ ${colors.bright}COMMANDS:${colors.reset}
 ${colors.bright}FLAGS:${colors.reset}
   ${colors.brightYellow}--port, -p${colors.reset} ${colors.gray}<n>${colors.reset}   Port to listen on ${colors.dim}(default: 3000 or $PORT)${colors.reset}
   ${colors.brightYellow}--remote, -r${colors.reset}        Start Cloudflare tunnel for remote access
+  ${colors.brightYellow}--no-auto-update${colors.reset}    Skip pre-start update check
   ${colors.brightYellow}--duration${colors.reset} ${colors.gray}<ms>${colors.reset}   Pairing window duration ${colors.dim}(pair only; default: 60000)${colors.reset}
   ${colors.brightYellow}--pin${colors.reset} ${colors.gray}<code>${colors.reset}        Override generated PIN ${colors.dim}(pair only)${colors.reset}
   ${colors.brightYellow}--help, -h${colors.reset}          Show this help

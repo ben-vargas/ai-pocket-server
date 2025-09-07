@@ -7,6 +7,7 @@ import { verifyAuthFromRequest } from '../auth/middleware';
 import type { Router } from '../server/router';
 import { wsManager } from '../server/websocket';
 import { handleAgentWebSocket, registerAgentRoutes } from './anthropic/index';
+import { handleOpenAIWebSocket, registerOpenAIRoutes } from './openai/index.js';
 import { setInitiatorDeviceId } from './session-initiators';
 import { sessionStoreFs } from './store/session-store-fs';
 
@@ -24,6 +25,8 @@ export function registerAgentModule(router: Router): void {
   });
   // Register Anthropic routes
   registerAgentRoutes(router);
+  // Register OpenAI routes (provider encapsulation)
+  registerOpenAIRoutes(router);
   // Initialize file-based session store
   void sessionStoreFs.init();
   
@@ -55,8 +58,13 @@ export async function handleAgentMessage(
         }
       }
     } catch {}
-    // Default to Anthropic for now
-    await handleAgentWebSocket(ws, clientId, message);
+    // Provider selection: 'openai' | 'anthropic' (default to 'openai' if unspecified)
+    const provider = (message.provider as string | undefined)?.toLowerCase();
+    if (provider === 'anthropic') {
+      await handleAgentWebSocket(ws, clientId, message);
+    } else {
+      await handleOpenAIWebSocket(ws, clientId, message);
+    }
   }
   
   // Future: Route to other providers

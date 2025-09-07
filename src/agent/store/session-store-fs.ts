@@ -40,6 +40,7 @@ interface Snapshot {
   phase?: string;
   pendingTools?: any[];
   initiatorDeviceId?: string;
+  previousResponseId?: string;
   workPlan?: {
     createdAt: string;
     updatedAt: string;
@@ -408,6 +409,17 @@ class SessionStoreFs {
         maxMode: snap.maxMode,
         phase: snap.phase,
       });
+    });
+  }
+
+  async setPreviousResponseId(sessionId: string, previousResponseId: string): Promise<void> {
+    await this.enqueue(sessionId, async () => {
+      const snap = await this.readSnapshot(sessionId);
+      if (!snap) return;
+      snap.previousResponseId = previousResponseId;
+      snap.lastActivity = new Date().toISOString();
+      await this.writeSnapshot(sessionId, snap);
+      await this.appendEvent(sessionId, { type: 'prev_response_id', previousResponseId, ts: snap.lastActivity });
     });
   }
 

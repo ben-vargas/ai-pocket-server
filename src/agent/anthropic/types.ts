@@ -82,6 +82,7 @@ export interface ThinkingBlock {
   type: 'thinking';
   thinking: string;
   signature?: string;
+  duration_ms?: number;
 }
 
 // ============================================
@@ -442,6 +443,8 @@ export interface StreamingState {
   error: ErrorEvent | null;
   // Auto-approval: tool requests collected during streaming to be executed after finalMessage
   autoToolRequests?: ToolRequest[];
+  // When true, the stream was aborted early and should not be persisted or continued
+  aborted?: boolean;
 }
 
 // Snapshot types for mobile to rebuild running sessions

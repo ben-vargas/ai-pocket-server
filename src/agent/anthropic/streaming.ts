@@ -40,7 +40,10 @@ export async function processStream(
   onToolResultProcessed: (toolId: string, output: string, isError: boolean) => Promise<void>,
   onStateUpdated: ((state: StreamingState) => void) | undefined,
   anthropic: Anthropic,
-  streamConfig: any
+  streamConfig: any,
+  // Optional abort hooks; when present we will stop the SDK stream and exit early
+  shouldAbort?: () => boolean,
+  abortSignal?: AbortSignal
 ): Promise<StreamingState> {
   // Initialize streaming state
   const state: StreamingState = {
@@ -73,6 +76,35 @@ export async function processStream(
     
     // Process events using async iteration - THE ONLY PATTERN THAT WORKS
     for await (const event of stream) {
+      // Cooperative abort: if caller requests stop, terminate the provider stream and exit
+      if ((shouldAbort && shouldAbort()) || (abortSignal && abortSignal.aborted)) {
+        try { (stream as any).controller?.abort?.(); } catch {}
+        try { (stream as any).abort?.(); } catch {}
+        // Finalize active text block content if any so UI keeps what it saw
+        if (state.activeBlockIndex !== null && state.activeBlockIndex < state.contentBlocks.length) {
+          const blk = state.contentBlocks[state.activeBlockIndex] as any;
+          if (blk && blk.type === 'text') {
+            (state.contentBlocks[state.activeBlockIndex] as any) = { type: 'text', text: currentBlockContent } as any;
+          }
+        }
+        state.isStreaming = false;
+        state.aborted = true;
+        onMessage({ type: 'agent:stream_event', sessionId, streamEvent: { type: 'message_stop' } as any });
+        // Synthesize a minimal final message to align with client expectations
+        const synthesizedFinal: any = {
+          id: state.currentMessage?.id || messageId,
+          type: 'message',
+          role: 'assistant',
+          content: state.contentBlocks as any,
+          model: 'claude-sonnet-4-20250514',
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        };
+        onMessage({ type: 'agent:stream_complete', sessionId, finalMessage: synthesizedFinal });
+        onMessage({ type: 'agent:status', sessionId, phase: 'stopped' } as any);
+        return state;
+      }
       console.log(`[Streaming] Event type: ${event.type}`);
       
       // Send raw event to client for real-time updates
@@ -193,7 +225,7 @@ export async function processStream(
                 // For Max (chatMode === false) auto-approval: queue tool requests to execute AFTER this stream completes,
                 // so we can send them back to the API in the required "user tool_result" message format.
                 // Auto-approve safe tools in Max mode, and always auto-approve work_plan
-                if ((!chatMode && isToolSafe(toolRequest)) || toolRequest.name === 'work_plan') {
+                if (!chatMode && isToolSafe(toolRequest)) {
                   state.autoToolRequests?.push(toolRequest);
                 } else {
                   // Chat mode: send to client for manual approval

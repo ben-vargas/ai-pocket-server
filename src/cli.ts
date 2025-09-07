@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from 'child_process';
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, readlinkSync, realpathSync, unlinkSync, writeFileSync } from 'fs';
 import fuzzysort from 'fuzzysort';
 import os from 'os';
+import path from 'path';
 import WebSocket from 'ws';
 import { startPairingWindow } from './auth/pairing';
 import { logger } from './shared/logger';
@@ -123,6 +124,98 @@ async function startServer(port: number, enableTunnel: boolean): Promise<void> {
   }
 }
 
+function normalizeVersion(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  return s.replace(/^v/i, '').trim();
+}
+
+function getInstallHome(): string {
+  try {
+    return path.join(os.homedir(), '.pocket-server');
+  } catch {
+    return path.join(process.cwd(), '.pocket-server');
+  }
+}
+
+function getCurrentInstalledVersion(): string | null {
+  try {
+    const home = getInstallHome();
+    const currentLink = path.join(home, 'current');
+    // Prefer symlink target name (e.g., .../releases/vX.Y.Z)
+    try {
+      const linkTarget = readlinkSync(currentLink);
+      const base = path.basename(linkTarget);
+      const norm = normalizeVersion(base);
+      if (norm) return norm;
+    } catch {
+      // Not a symlink or cannot read; fall through
+    }
+    // Resolve real path and check tail directory name
+    try {
+      const real = realpathSync(currentLink);
+      const base = path.basename(real);
+      const norm = normalizeVersion(base);
+      if (norm) return norm;
+    } catch {}
+    // Fallback: read package.json version in current/app
+    try {
+      const pkgPath = path.join(currentLink, 'app', 'package.json');
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: string };
+      const norm = normalizeVersion(pkg?.version);
+      if (norm) return norm;
+    } catch {}
+  } catch {}
+  return null;
+}
+
+async function fetchLatestVersionFromInstaller(installerUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(installerUrl, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const text = await res.text();
+    const m = text.match(/\nVERSION="([^"]+)"/);
+    const raw = (m && m[1]) ? m[1] : null;
+    const norm = normalizeVersion(raw);
+    return norm;
+  } catch {
+    return null;
+  }
+}
+
+async function maybeAutoUpdateBeforeStart(flags: Record<string, string | boolean>): Promise<boolean> {
+  // Allow opt-out
+  if ((flags as any)['no-auto-update']) return false;
+  const currentVersion = getCurrentInstalledVersion();
+  // If not installed (dev mode), skip
+  if (!currentVersion) return false;
+  const installerUrl = process.env.POCKET_INSTALL_URL || 'https://www.pocket-agent.xyz/install';
+  const latest = await fetchLatestVersionFromInstaller(installerUrl);
+  if (!latest) return false;
+  if (latest === currentVersion) return false;
+
+  // Build start args to preserve user's intent
+  const startArgs: string[] = [];
+  if (typeof flags.port === 'string' && flags.port) {
+    startArgs.push('--port', String(flags.port));
+  }
+  if (flags.remote) {
+    startArgs.push('--remote');
+  }
+
+  // Run installer with start args so the updated server starts immediately
+  const env = { ...process.env, POCKET_SERVER_START_ARGS: startArgs.join(' ') };
+  console.log(status.updating());
+  const sh = spawn('/bin/bash', ['-lc', `curl -fsSL ${installerUrl} | bash`], { stdio: 'inherit', env });
+  await new Promise<void>((resolve, reject) => {
+    sh.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`Installer exited with code ${code}`)));
+    sh.on('error', reject);
+  });
+  // We initiated an update which already starts the server; do not continue here
+  return true;
+}
+
 async function cmdStart(flags: Record<string, string | boolean>): Promise<void> {
   const port = flags.port ? Number(flags.port) : DEFAULT_PORT;
   if (!Number.isFinite(port) || port < 1 || port > 65535) {
@@ -130,6 +223,9 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
     process.exit(2);
   }
   const enableTunnel = Boolean(flags.remote);
+  // Auto-update before starting, if applicable
+  const updated = await maybeAutoUpdateBeforeStart(flags);
+  if (updated) return;
   await startServer(port, enableTunnel);
 }
 
